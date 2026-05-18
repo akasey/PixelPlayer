@@ -189,6 +189,8 @@ private data class PendingMetadataEdit(
     val title: String,
     val artist: String,
     val album: String,
+    val albumArtist: String,
+    val composer: String,
     val genre: String,
     val lyrics: String,
     val trackNumber: Int,
@@ -4530,6 +4532,8 @@ class PlayerViewModel @Inject constructor(
         newTitle: String,
         newArtist: String,
         newAlbum: String,
+        newAlbumArtist: String,
+        newComposer: String,
         newGenre: String,
         newLyrics: String,
         newTrackNumber: Int,
@@ -4553,6 +4557,8 @@ class PlayerViewModel @Inject constructor(
                         title = newTitle,
                         artist = newArtist,
                         album = newAlbum,
+                        albumArtist = newAlbumArtist,
+                        composer = newComposer,
                         genre = newGenre,
                         lyrics = newLyrics,
                         trackNumber = newTrackNumber,
@@ -4566,7 +4572,7 @@ class PlayerViewModel @Inject constructor(
                 }
             }
 
-            performMetadataEdit(song, newTitle, newArtist, newAlbum, newGenre, newLyrics,
+            performMetadataEdit(song, newTitle, newArtist, newAlbum, newAlbumArtist, newComposer, newGenre, newLyrics,
                 newTrackNumber, newDiscNumber, newReplayGainTrackGainDb, newReplayGainAlbumGainDb, coverArtUpdate)
         }
     }
@@ -4613,7 +4619,8 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             performMetadataEdit(
                 pending.song, pending.title, pending.artist, pending.album,
-                pending.genre, pending.lyrics, pending.trackNumber, pending.discNumber,
+                pending.albumArtist, pending.composer, pending.genre, pending.lyrics,
+                pending.trackNumber, pending.discNumber,
                 pending.replayGainTrackGainDb, pending.replayGainAlbumGainDb, pending.coverArtUpdate
             )
         }
@@ -4671,6 +4678,8 @@ class PlayerViewModel @Inject constructor(
         newTitle: String,
         newArtist: String,
         newAlbum: String,
+        newAlbumArtist: String,
+        newComposer: String,
         newGenre: String,
         newLyrics: String,
         newTrackNumber: Int,
@@ -4686,6 +4695,8 @@ class PlayerViewModel @Inject constructor(
             newTitle = newTitle,
             newArtist = newArtist,
             newAlbum = newAlbum,
+            newAlbumArtist = newAlbumArtist,
+            newComposer = newComposer,
             newGenre = newGenre,
             newLyrics = newLyrics,
             newTrackNumber = newTrackNumber,
@@ -4973,6 +4984,8 @@ class PlayerViewModel @Inject constructor(
                     newTitle = sourceSong.title,
                     newArtist = sourceSong.artist,
                     newAlbum = sourceSong.album,
+                    newAlbumArtist = sourceSong.albumArtist ?: "",
+                    newComposer = "",
                     newGenre = newGenre,
                     newLyrics = sourceSong.lyrics ?: "",
                     newTrackNumber = sourceSong.trackNumber,

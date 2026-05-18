@@ -217,12 +217,14 @@ fun DailyMixScreen(
                 }
                 showSongInfoSheet = false
             },
-            onEditSong = { newTitle, newArtist, newAlbum, newGenre, newLyrics, newTrackNumber, newDiscNumber, replayGainTrackGainDb, replayGainAlbumGainDb, coverArtUpdate ->
+            onEditSong = { newTitle, newArtist, newAlbum, newAlbumArtist, newComposer, newGenre, newLyrics, newTrackNumber, newDiscNumber, replayGainTrackGainDb, replayGainAlbumGainDb, coverArtUpdate ->
                 playerViewModel.editSongMetadata(
                     song,
                     newTitle,
                     newArtist,
                     newAlbum,
+                    newAlbumArtist,
+                    newComposer,
                     newGenre,
                     newLyrics,
                     newTrackNumber,

@@ -104,6 +104,8 @@ fun EditSongSheet(
         title: String,
         artist: String,
         album: String,
+        albumArtist: String,
+        composer: String,
         genre: String,
         lyrics: String,
         trackNumber: Int,
@@ -148,6 +150,8 @@ private fun EditSongContent(
         title: String,
         artist: String,
         album: String,
+        albumArtist: String,
+        composer: String,
         genre: String,
         lyrics: String,
         trackNumber: Int,
@@ -160,6 +164,8 @@ private fun EditSongContent(
     var title by remember { mutableStateOf(song.title) }
     var artist by remember { mutableStateOf(song.displayArtist) }
     var album by remember { mutableStateOf(song.album) }
+    var albumArtist by remember { mutableStateOf(song.albumArtist ?: "") }
+    var composer by remember { mutableStateOf("") }
     var genre by remember { mutableStateOf(song.genre ?: "") }
     var lyrics by remember { mutableStateOf(song.lyrics ?: "") }
     var trackNumber by remember { mutableStateOf(song.trackNumber.toString()) }
@@ -185,6 +191,8 @@ private fun EditSongContent(
         title = song.title
         artist = song.displayArtist
         album = song.album
+        albumArtist = song.albumArtist ?: ""
+        composer = ""
         genre = song.genre ?: ""
         lyrics = song.lyrics ?: ""
         trackNumber = song.trackNumber.toString()
@@ -216,6 +224,7 @@ private fun EditSongContent(
                 }
             }
 
+            embeddedMetadata?.composer?.takeIf { it.isNotBlank() }?.let { composer = it }
             replayGainTrackGainDb = formatReplayGainForInput(embeddedMetadata?.replayGainTrackGainDb)
             replayGainAlbumGainDb = formatReplayGainForInput(embeddedMetadata?.replayGainAlbumGainDb)
         }
@@ -350,9 +359,7 @@ private fun EditSongContent(
 
             // --- Campo de Título ---
             item {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         modifier = Modifier.padding(start = 4.dp),
                         text = stringResource(R.string.song_field_title),
@@ -365,17 +372,126 @@ private fun EditSongContent(
                         colors = textFieldColors,
                         onValueChange = { title = it },
                         placeholder = { Text(stringResource(R.string.song_field_title)) },
-                        leadingIcon = { Icon(Icons.Rounded.MusicNote, tint = MaterialTheme.colorScheme.tertiary,contentDescription = stringResource(R.string.cd_song_title_icon)) },
+                        leadingIcon = { Icon(Icons.Rounded.MusicNote, tint = MaterialTheme.colorScheme.tertiary, contentDescription = stringResource(R.string.cd_song_title_icon)) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
                 }
             }
 
+            // --- Campo de Artista ---
             item {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        modifier = Modifier.padding(start = 4.dp),
+                        text = stringResource(R.string.song_field_artist),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    OutlinedTextField(
+                        value = artist,
+                        colors = textFieldColors,
+                        shape = textFieldShape,
+                        onValueChange = { artist = it },
+                        placeholder = { Text(stringResource(R.string.song_field_artist)) },
+                        leadingIcon = { Icon(Icons.Rounded.Person, tint = MaterialTheme.colorScheme.primary, contentDescription = stringResource(R.string.song_field_artist)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            }
+
+            // --- Campo de Álbum ---
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        modifier = Modifier.padding(start = 4.dp),
+                        text = stringResource(R.string.song_field_album),
+                        color = MaterialTheme.colorScheme.tertiary,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    OutlinedTextField(
+                        value = album,
+                        colors = textFieldColors,
+                        shape = textFieldShape,
+                        onValueChange = { album = it },
+                        placeholder = { Text(stringResource(R.string.song_field_album)) },
+                        leadingIcon = { Icon(Icons.Rounded.Album, tint = MaterialTheme.colorScheme.tertiary, contentDescription = stringResource(R.string.song_field_album)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            }
+
+            // --- Campo de Album Artist ---
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        modifier = Modifier.padding(start = 4.dp),
+                        text = stringResource(R.string.song_field_album_artist),
+                        color = MaterialTheme.colorScheme.secondary,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    OutlinedTextField(
+                        value = albumArtist,
+                        colors = textFieldColors,
+                        shape = textFieldShape,
+                        onValueChange = { albumArtist = it },
+                        placeholder = { Text(stringResource(R.string.song_field_album_artist)) },
+                        leadingIcon = { Icon(Icons.Rounded.Person, tint = MaterialTheme.colorScheme.secondary, contentDescription = stringResource(R.string.song_field_album_artist)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            }
+
+            // --- Campo de Género ---
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        modifier = Modifier.padding(start = 4.dp),
+                        text = stringResource(R.string.song_field_genre),
+                        color = MaterialTheme.colorScheme.secondary,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    OutlinedTextField(
+                        value = genre,
+                        colors = textFieldColors,
+                        shape = textFieldShape,
+                        onValueChange = { genre = it },
+                        placeholder = { Text(stringResource(R.string.song_field_genre)) },
+                        leadingIcon = { Icon(Icons.Rounded.Category, tint = MaterialTheme.colorScheme.secondary, contentDescription = stringResource(R.string.song_field_genre)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            }
+
+            // --- Campo de Compositor ---
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        modifier = Modifier.padding(start = 4.dp),
+                        text = stringResource(R.string.song_field_composer),
+                        color = MaterialTheme.colorScheme.tertiary,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    OutlinedTextField(
+                        value = composer,
+                        colors = textFieldColors,
+                        shape = textFieldShape,
+                        onValueChange = { composer = it },
+                        placeholder = { Text(stringResource(R.string.song_field_composer)) },
+                        leadingIcon = { Icon(Icons.Rounded.MusicNote, tint = MaterialTheme.colorScheme.tertiary, contentDescription = stringResource(R.string.song_field_composer)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            }
+
+            // --- Campo de Track Number ---
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         modifier = Modifier.padding(start = 4.dp),
                         text = stringResource(R.string.song_field_track_number),
@@ -396,10 +512,9 @@ private fun EditSongContent(
                 }
             }
 
+            // --- Campo de Disc Number ---
             item {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         modifier = Modifier.padding(start = 4.dp),
                         text = stringResource(R.string.song_field_disc_number),
@@ -420,10 +535,9 @@ private fun EditSongContent(
                 }
             }
 
+            // --- Campo de ReplayGain Track ---
             item {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         modifier = Modifier.padding(start = 4.dp),
                         text = stringResource(R.string.song_field_replaygain_track_db),
@@ -450,10 +564,9 @@ private fun EditSongContent(
                 }
             }
 
+            // --- Campo de ReplayGain Album ---
             item {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         modifier = Modifier.padding(start = 4.dp),
                         text = stringResource(R.string.song_field_replaygain_album_db),
@@ -480,83 +593,9 @@ private fun EditSongContent(
                 }
             }
 
-            // --- Campo de Artista ---
-            item {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        modifier = Modifier.padding(start = 4.dp),
-                        text = stringResource(R.string.song_field_artist),
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    OutlinedTextField(
-                        value = artist,
-                        colors = textFieldColors,
-                        shape = textFieldShape,
-                        onValueChange = { artist = it },
-                        placeholder = { Text(stringResource(R.string.song_field_artist)) },
-                        leadingIcon = { Icon(Icons.Rounded.Person, tint = MaterialTheme.colorScheme.primary, contentDescription = stringResource(R.string.song_field_artist)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                }
-            }
-
-            // --- Campo de Álbum ---
-            item {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        modifier = Modifier.padding(start = 4.dp),
-                        text = stringResource(R.string.song_field_album),
-                        color = MaterialTheme.colorScheme.tertiary,
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    OutlinedTextField(
-                        value = album,
-                        colors = textFieldColors,
-                        shape = textFieldShape,
-                        onValueChange = { album = it },
-                        placeholder = { Text(stringResource(R.string.song_field_album)) },
-                        leadingIcon = { Icon(Icons.Rounded.Album, tint = MaterialTheme.colorScheme.tertiary, contentDescription = stringResource(R.string.song_field_album)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                }
-            }
-
-            // --- Campo de Género ---
-            item {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        modifier = Modifier.padding(start = 4.dp),
-                        text = stringResource(R.string.song_field_genre),
-                        color = MaterialTheme.colorScheme.secondary,
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    OutlinedTextField(
-                        value = genre,
-                        colors = textFieldColors,
-                        shape = textFieldShape,
-                        onValueChange = { genre = it },
-                        placeholder = { Text(stringResource(R.string.song_field_genre)) },
-                        leadingIcon = { Icon(Icons.Rounded.Category, tint = MaterialTheme.colorScheme.secondary, contentDescription = stringResource(R.string.song_field_genre)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                }
-            }
-
             // --- Campo de Letra ---
             item {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         modifier = Modifier.padding(start = 4.dp),
                         text = stringResource(R.string.lyrics),
@@ -635,6 +674,8 @@ private fun EditSongContent(
                                     title.trim(),
                                     artist.trim(),
                                     album.trim(),
+                                    albumArtist.trim(),
+                                    composer.trim(),
                                     genre.trim(),
                                     lyrics,
                                     resolvedTrackNumber,

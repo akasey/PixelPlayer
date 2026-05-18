@@ -106,6 +106,8 @@ fun SongInfoBottomSheet(
         title: String,
         artist: String,
         album: String,
+        albumArtist: String,
+        composer: String,
         genre: String,
         lyrics: String,
         trackNumber: Int,
@@ -829,11 +831,13 @@ fun SongInfoBottomSheet(
         visible = showEditSheet,
         song = song,
         onDismiss = { showEditSheet = false },
-        onSave = { title, artist, album, genre, lyrics, trackNumber, discNumber, replayGainTrackGainDb, replayGainAlbumGainDb, coverArt ->
+        onSave = { title, artist, album, albumArtist, composer, genre, lyrics, trackNumber, discNumber, replayGainTrackGainDb, replayGainAlbumGainDb, coverArt ->
             onEditSong(
                 title,
                 artist,
                 album,
+                albumArtist,
+                composer,
                 genre,
                 lyrics,
                 trackNumber,
