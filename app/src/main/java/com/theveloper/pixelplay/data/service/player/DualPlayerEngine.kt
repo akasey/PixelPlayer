@@ -36,7 +36,6 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.mp3.Mp3Extractor
 import androidx.media3.extractor.flac.FlacExtractor
-import androidx.media3.extractor.mp4.Mp4Extractor
 import com.theveloper.pixelplay.data.diagnostics.PerformanceMetrics
 import com.theveloper.pixelplay.data.model.TransitionSettings
 import com.theveloper.pixelplay.data.telegram.TelegramRepository
@@ -814,7 +813,10 @@ class DualPlayerEngine @Inject constructor(
         cancelAudioOffloadFallback()
 
         val desiredPlayWhenReady = playerA.playWhenReady
-        val positionMs = playerA.currentPosition
+        // Guard against snapshotting a position that landed during a bad early-startup seek
+        // (e.g. an offload stall rebuild firing while the player is at a spurious offset).
+        // Positions under 5s on first playback are more likely noise than intent.
+        val positionMs = if (playerA.currentPosition > 5_000L) playerA.currentPosition else 0L
         val currentIndex = playerA.currentMediaItemIndex.coerceAtLeast(0)
         // Pre-sized ArrayList avoids the IntRange object and the extra copy produced by .map.
         val mediaItemCount = playerA.mediaItemCount
@@ -973,7 +975,9 @@ class DualPlayerEngine @Inject constructor(
         val dataSourceFactory = DefaultDataSource.Factory(context)
         val resolvingFactory = ResolvingDataSource.Factory(dataSourceFactory, resolver)
         val extractorsFactory = DefaultExtractorsFactory()
-            .setMp4ExtractorFlags(Mp4Extractor.FLAG_WORKAROUND_IGNORE_EDIT_LISTS)
+            // FLAG_WORKAROUND_IGNORE_EDIT_LISTS intentionally removed: it breaks Opus files
+            // by discarding the edit list that encodes the pre-skip (encoder delay), causing
+            // ExoPlayer to seek ~44-52s into the track on first playback.
             // FLAG_ENABLE_CONSTANT_BITRATE_SEEKING (not _ALWAYS): fallback-only CBR seeking
             // so VBR MP3s with proper Xing/VBRI headers still use their seek table and land
             // on the exact frame instead of jumping ±30 s on a VBR file.
