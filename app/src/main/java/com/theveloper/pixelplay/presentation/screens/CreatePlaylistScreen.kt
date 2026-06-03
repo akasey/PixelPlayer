@@ -586,7 +586,7 @@ private fun CreatePlaylistContent(
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
-                                    Spacer(Modifier.width(8.dp))
+                                    Spacer(Modifier.width(6.dp))
                                     Text(
                                         text = stringResource(labelRes),
                                         fontFamily = GoogleSansRounded,
