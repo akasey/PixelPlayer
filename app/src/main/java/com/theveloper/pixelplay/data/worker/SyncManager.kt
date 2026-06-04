@@ -74,8 +74,16 @@ class SyncManager @Inject constructor(
         workManager.getWorkInfosForUniqueWorkFlow(SyncWorker.WORK_NAME)
             .map { workInfos ->
                 val isRunning = workInfos.any { it.state == WorkInfo.State.RUNNING }
-                val isEnqueued = workInfos.any { it.state == WorkInfo.State.ENQUEUED }
-                isRunning || isEnqueued
+                // A freshly enqueued worker (runAttemptCount == 0) is about to start, so it
+                // counts as syncing. An ENQUEUED worker with runAttemptCount > 0 is sitting in
+                // retry backoff — and the only retry path is SyncWorker deferring an INCREMENTAL
+                // sync while playback is active (see SyncWorker.doWork). It does no work during
+                // that window (up to ~16 min of exponential backoff), so we keep the
+                // "Syncing library…" indicator off instead of showing it indefinitely.
+                val isFreshlyEnqueued = workInfos.any {
+                    it.state == WorkInfo.State.ENQUEUED && it.runAttemptCount == 0
+                }
+                isRunning || isFreshlyEnqueued
             }
             .distinctUntilChanged()
             .shareIn(
@@ -142,7 +150,14 @@ class SyncManager @Inject constructor(
                         )
                     }
                     enqueuedWork != null -> {
-                        SyncProgress(isRunning = true, isCompleted = false, phase = SyncProgress.SyncPhase.IDLE)
+                        // Mirror isSyncing: a retry-backoff enqueue (runAttemptCount > 0) is a
+                        // sync deferred while playback is active and does no work, so don't
+                        // surface it as running. Only a fresh enqueue waiting to start does.
+                        if (enqueuedWork.runAttemptCount == 0) {
+                            SyncProgress(isRunning = true, isCompleted = false, phase = SyncProgress.SyncPhase.IDLE)
+                        } else {
+                            SyncProgress()
+                        }
                     }
                     else -> SyncProgress()
                 }

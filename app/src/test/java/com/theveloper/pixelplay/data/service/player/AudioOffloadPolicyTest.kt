@@ -105,4 +105,74 @@ class AudioOffloadPolicyTest {
 
         assertThat(shouldFallback).isFalse()
     }
+
+    @Test
+    fun earlyBuffering_disablesOffloadForGenuineHalReset() {
+        val shouldDisable = shouldDisableAudioOffloadOnEarlyBuffering(
+            audioOffloadEnabled = true,
+            transitionRunning = false,
+            lastPlayingAtMs = 1_000L,
+            timeSincePlayingMs = 120L,
+            isPostSeekBuffering = false,
+            isPostTransitionBuffering = false
+        )
+
+        assertThat(shouldDisable).isTrue()
+    }
+
+    @Test
+    fun earlyBuffering_doesNotDisableOffloadRightAfterCrossfade() {
+        val shouldDisable = shouldDisableAudioOffloadOnEarlyBuffering(
+            audioOffloadEnabled = true,
+            transitionRunning = false,
+            lastPlayingAtMs = 1_000L,
+            timeSincePlayingMs = 120L,
+            isPostSeekBuffering = false,
+            isPostTransitionBuffering = true
+        )
+
+        assertThat(shouldDisable).isFalse()
+    }
+
+    @Test
+    fun earlyBuffering_doesNotDisableOffloadRightAfterSeek() {
+        val shouldDisable = shouldDisableAudioOffloadOnEarlyBuffering(
+            audioOffloadEnabled = true,
+            transitionRunning = false,
+            lastPlayingAtMs = 1_000L,
+            timeSincePlayingMs = 120L,
+            isPostSeekBuffering = true,
+            isPostTransitionBuffering = false
+        )
+
+        assertThat(shouldDisable).isFalse()
+    }
+
+    @Test
+    fun earlyBuffering_doesNotDisableOffloadDuringActiveTransition() {
+        val shouldDisable = shouldDisableAudioOffloadOnEarlyBuffering(
+            audioOffloadEnabled = true,
+            transitionRunning = true,
+            lastPlayingAtMs = 1_000L,
+            timeSincePlayingMs = 120L,
+            isPostSeekBuffering = false,
+            isPostTransitionBuffering = false
+        )
+
+        assertThat(shouldDisable).isFalse()
+    }
+
+    @Test
+    fun earlyBuffering_doesNotDisableOffloadAfterLongSteadyPlayback() {
+        val shouldDisable = shouldDisableAudioOffloadOnEarlyBuffering(
+            audioOffloadEnabled = true,
+            transitionRunning = false,
+            lastPlayingAtMs = 1_000L,
+            timeSincePlayingMs = 5_000L,
+            isPostSeekBuffering = false,
+            isPostTransitionBuffering = false
+        )
+
+        assertThat(shouldDisable).isFalse()
+    }
 }

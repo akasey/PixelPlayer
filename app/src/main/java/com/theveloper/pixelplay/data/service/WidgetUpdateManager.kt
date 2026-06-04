@@ -3,6 +3,7 @@ package com.theveloper.pixelplay.data.service
 import android.content.Context
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
+import com.theveloper.pixelplay.data.diagnostics.PerformanceMetrics
 import com.theveloper.pixelplay.data.model.PlayerInfo
 import com.theveloper.pixelplay.data.service.wear.WearStatePublisher
 import com.theveloper.pixelplay.ui.glancewidget.BarWidget4x1
@@ -132,10 +133,14 @@ internal class WidgetUpdateManager(
     }
 
     private fun shouldPublishWearState(old: PlayerInfo, new: PlayerInfo): Boolean {
-        return shouldUpdateWidget(old, new) || old.wearQueueRevision != new.wearQueueRevision
+        return shouldUpdateWidget(old, new) ||
+            old.wearQueueRevision != new.wearQueueRevision ||
+            old.lyrics != new.lyrics ||
+            old.isLoadingLyrics != new.isLoadingLyrics
     }
 
     private suspend fun updateGlanceWidgets(playerInfo: PlayerInfo) = withContext(Dispatchers.IO) {
+        val startNanos = System.nanoTime()
         try {
             val glanceManager = GlanceAppWidgetManager(context)
             val widgetPlayerInfo = playerInfo.toWidgetTransportState()
@@ -164,7 +169,14 @@ internal class WidgetUpdateManager(
                 GridWidget2x2().update(context, id)
             }
 
-            if (glanceIds.isNotEmpty() || barGlanceIds.isNotEmpty() || controlGlanceIds.isNotEmpty() || gridGlanceIds.isNotEmpty()) {
+            val anyWidgets = glanceIds.isNotEmpty() || barGlanceIds.isNotEmpty() ||
+                controlGlanceIds.isNotEmpty() || gridGlanceIds.isNotEmpty()
+            PerformanceMetrics.setWidgetActive(anyWidgets)
+            if (anyWidgets) {
+                PerformanceMetrics.recordTiming(
+                    PerformanceMetrics.Timings.WIDGET_UPDATE,
+                    (System.nanoTime() - startNanos) / 1_000_000
+                )
                 Timber.tag(TAG)
                     .d("Widgets actualizados: ${playerInfo.songTitle} (Original: ${glanceIds.size}, Bar: ${barGlanceIds.size}, Control: ${controlGlanceIds.size})")
             } else {

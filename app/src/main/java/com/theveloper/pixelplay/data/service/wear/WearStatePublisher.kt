@@ -11,7 +11,9 @@ import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import com.theveloper.pixelplay.data.model.PlayerInfo
 import com.theveloper.pixelplay.shared.WearDataPaths
+import com.theveloper.pixelplay.shared.WearLyrics
 import com.theveloper.pixelplay.shared.WearPlayerState
+import com.theveloper.pixelplay.shared.WearSyncedLyricLine
 import com.theveloper.pixelplay.shared.WearThemePalette
 import com.theveloper.pixelplay.utils.AlbumArtUtils
 import com.theveloper.pixelplay.utils.ArtworkTransportSanitizer
@@ -45,6 +47,7 @@ class WearStatePublisher @Inject constructor(
 
     companion object {
         private const val TAG = "WearStatePublisher"
+        private const val MAX_WEAR_LYRIC_LINES = 180
     }
 
     /**
@@ -102,6 +105,7 @@ class WearStatePublisher @Inject constructor(
             volumeMax = volumeMax,
             themePalette = buildWearThemePalette(playerInfo),
             queueRevision = playerInfo.wearQueueRevision,
+            lyrics = playerInfo.lyrics?.toWearLyrics(),
         )
 
         val stateJson = json.encodeToString(wearState)
@@ -302,5 +306,36 @@ class WearStatePublisher @Inject constructor(
         val lightContrast = ColorUtils.calculateContrast(light, opaqueBackground)
         val darkContrast = ColorUtils.calculateContrast(dark, opaqueBackground)
         return if (lightContrast >= darkContrast) light else dark
+    }
+
+    private fun com.theveloper.pixelplay.data.model.Lyrics.toWearLyrics(): WearLyrics? {
+        val syncedLines = synced
+            ?.asSequence()
+            ?.filter { it.line.isNotBlank() || !it.translation.isNullOrBlank() || !it.romanization.isNullOrBlank() }
+            ?.take(MAX_WEAR_LYRIC_LINES)
+            ?.map { line ->
+                WearSyncedLyricLine(
+                    timeMs = line.time,
+                    line = line.line,
+                    translation = line.translation,
+                    romanization = line.romanization,
+                )
+            }
+            ?.toList()
+            .orEmpty()
+
+        if (syncedLines.isNotEmpty()) {
+            return WearLyrics(synced = syncedLines)
+        }
+
+        val plainLines = plain
+            ?.asSequence()
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.take(MAX_WEAR_LYRIC_LINES)
+            ?.toList()
+            .orEmpty()
+
+        return WearLyrics(plain = plainLines).takeIf { it.hasLyrics }
     }
 }

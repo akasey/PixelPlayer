@@ -147,6 +147,14 @@
     <string name="device_capabilities_format_software">Software decoder</string>
     <string name="device_capabilities_format_offload">Offload</string>
     <string name="device_capabilities_format_library_count">%1$d in library</string>
+    <string name="device_capabilities_report_title">Performance report</string>
+    <string name="device_capabilities_report_description">Generate a shareable diagnostic report to help us classify playback or scan lag. It contains only device, library, and timing data — no file paths, titles, or artists.</string>
+    <string name="device_capabilities_report_generate">Generate report</string>
+    <string name="device_capabilities_report_regenerate">Regenerate</string>
+    <string name="device_capabilities_report_copy">Copy</string>
+    <string name="device_capabilities_report_share">Share</string>
+    <string name="device_capabilities_report_copied">Report copied to clipboard</string>
+    <string name="device_capabilities_report_share_title">PixelPlay performance report</string>
     <string name="device_capabilities_findings_title">Compatibility Findings</string>
     <string name="device_capabilities_finding_clear_title">No major incompatibilities</string>
     <string name="device_capabilities_finding_clear_body">Your indexed tracks match the decoders Android reports on this device.</string>

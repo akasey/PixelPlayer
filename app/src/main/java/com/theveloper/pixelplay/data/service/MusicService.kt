@@ -40,6 +40,7 @@ import com.google.common.util.concurrent.SettableFuture
 import com.theveloper.pixelplay.PixelPlayApplication
 import com.theveloper.pixelplay.MainActivity
 import com.theveloper.pixelplay.R
+import com.theveloper.pixelplay.data.diagnostics.PerformanceMetrics
 import com.theveloper.pixelplay.data.model.PlayerInfo
 import com.theveloper.pixelplay.data.model.PlaybackQueueItemSnapshot
 import com.theveloper.pixelplay.data.model.PlaybackQueueSnapshot
@@ -568,6 +569,25 @@ class MusicService : MediaLibraryService() {
                     controller.packageName,
                     listOfNotNull(session.player.currentMediaItem)
                 )
+
+                // Diagnostics: record external controllers (Android Auto, Wear, other apps)
+                // so the performance report can correlate lag with their artwork/queue demands.
+                if (!controllerPackage.startsWith(APP_PACKAGE_PREFIX)) {
+                    val isAuto = controllerPackage.startsWith("com.google.android.projection.gearhead") ||
+                        controllerPackage.startsWith("com.google.android.gms.car") ||
+                        controllerPackage.startsWith("com.google.android.apps.automotive") ||
+                        controller.connectionHints.keySet().any { it.contains("automotive", ignoreCase = true) }
+                    val isWear = BLOCKED_WEAR_CONTROLLER_PREFIXES.any { controllerPackage.startsWith(it) } ||
+                        controller.connectionHints.keySet().any { key ->
+                            WEAR_HINT_KEY_MARKERS.any { key.contains(it, ignoreCase = true) }
+                        }
+                    PerformanceMetrics.recordControllerConnected(
+                        packageName = controllerPackage,
+                        isAndroidAuto = isAuto,
+                        isWear = isWear,
+                        elapsedRealtimeMs = SystemClock.elapsedRealtime()
+                    )
+                }
 
                 return MediaSession.ConnectionResult.accept(
                     sessionCommandsBuilder.build(),
@@ -1989,6 +2009,7 @@ class MusicService : MediaLibraryService() {
         val wearThemePalette = schemePair?.let { buildWearThemePalette(it.dark) }
 
         val isFavorite = isSongFavorite(mediaId)
+        val lyrics = resolveWearLyrics(mediaId)
         val wearQueueRevision = buildWearQueueRevision(
             timeline = snapshotTimeline,
             currentIndex = snapshotWindowIndex,
@@ -2038,6 +2059,7 @@ class MusicService : MediaLibraryService() {
             currentPositionMs = currentPosition,
             totalDurationMs = totalDuration,
             isFavorite = isFavorite,
+            lyrics = lyrics,
             queue = queueItems,
             themeColors = widgetColors,
             isShuffleEnabled = shuffleEnabled,
@@ -2045,6 +2067,19 @@ class MusicService : MediaLibraryService() {
             wearThemePalette = wearThemePalette,
             wearQueueRevision = wearQueueRevision,
         )
+    }
+
+    private suspend fun resolveWearLyrics(mediaId: String?): com.theveloper.pixelplay.data.model.Lyrics? {
+        val songId = mediaId?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching {
+            withContext(Dispatchers.IO) {
+                val song = musicRepository.getSong(songId).first() ?: return@withContext null
+                musicRepository.getStoredLyrics(song)?.first
+            }
+        }.getOrElse { error ->
+            Timber.tag(TAG).d(error, "Unable to resolve Wear lyrics for mediaId=%s", songId)
+            null
+        }
     }
 
     // Color scheme cache: skip recomputation when art URI, palette style, and accuracy haven't changed

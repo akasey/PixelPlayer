@@ -111,18 +111,24 @@ object MediaItemBuilder {
     }
 
     fun buildForExternalController(context: Context, song: Song): MediaItem {
-        return MediaItem.Builder()
-            .setMediaId(song.id)
-            .setUri(playbackUri(song))
-            .setMimeType(playbackMimeType(song))
-            .setMediaMetadata(
-                buildMediaMetadataForSong(
-                    song = song,
-                    context = context,
-                    exposedArtworkUri = externalControllerArtworkUri(context, song.albumArtUriString)
+        // This is the MediaSession item path for Android Auto / other external controllers;
+        // time it so the performance report can attribute browse/queue lag here.
+        return com.theveloper.pixelplay.data.diagnostics.PerformanceMetrics.time(
+            com.theveloper.pixelplay.data.diagnostics.PerformanceMetrics.Timings.MEDIASESSION_ITEM_BUILD
+        ) {
+            MediaItem.Builder()
+                .setMediaId(song.id)
+                .setUri(playbackUri(song))
+                .setMimeType(playbackMimeType(song))
+                .setMediaMetadata(
+                    buildMediaMetadataForSong(
+                        song = song,
+                        context = context,
+                        exposedArtworkUri = externalControllerArtworkUri(context, song.albumArtUriString)
+                    )
                 )
-            )
-            .build()
+                .build()
+        }
     }
 
     fun playbackUri(song: Song): Uri = playbackUri(

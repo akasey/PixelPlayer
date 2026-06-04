@@ -1,6 +1,8 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import android.content.Intent
 import android.text.format.Formatter
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -25,25 +27,34 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Assessment
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Speaker
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -63,9 +74,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -177,6 +190,7 @@ fun DeviceCapabilitiesScreen(
                 state = state,
                 lazyListState = lazyListState,
                 topPadding = currentTopBarHeightDp,
+                onGenerateReport = viewModel::generatePerformanceReport,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -198,6 +212,7 @@ private fun DeviceCapabilitiesContent(
     state: DeviceCapabilitiesState,
     lazyListState: LazyListState,
     topPadding: Dp,
+    onGenerateReport: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -253,6 +268,121 @@ private fun DeviceCapabilitiesContent(
 
         item {
             DeviceInfoPanel(deviceInfo = state.deviceInfo)
+        }
+
+        item {
+            PerformanceReportCard(
+                report = state.performanceReport,
+                isGenerating = state.isGeneratingReport,
+                onGenerate = onGenerateReport
+            )
+        }
+    }
+}
+
+@Composable
+private fun PerformanceReportCard(
+    report: String?,
+    isGenerating: Boolean,
+    onGenerate: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val copiedMessage = stringResource(R.string.device_capabilities_report_copied)
+    val shareTitle = stringResource(R.string.device_capabilities_report_share_title)
+
+    CapabilityCard(
+        title = stringResource(R.string.device_capabilities_report_title),
+        icon = Icons.Rounded.Assessment,
+        modifier = modifier
+    ) {
+        Text(
+            text = stringResource(R.string.device_capabilities_report_description),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(
+                onClick = onGenerate,
+                enabled = !isGenerating
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text(
+                        text = stringResource(
+                            if (report == null) R.string.device_capabilities_report_generate
+                            else R.string.device_capabilities_report_regenerate
+                        )
+                    )
+                }
+            }
+
+            if (report != null) {
+                OutlinedButton(
+                    onClick = {
+                        clipboardManager.setText(AnnotatedString(report))
+                        Toast.makeText(context, copiedMessage, Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ContentCopy,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.device_capabilities_report_copy))
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, shareTitle)
+                            putExtra(Intent.EXTRA_TEXT, report)
+                        }
+                        context.startActivity(Intent.createChooser(sendIntent, shareTitle))
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.device_capabilities_report_share))
+                }
+            }
+        }
+
+        if (report != null) {
+            Surface(
+                shape = AbsoluteSmoothCornerShape(18.dp, 60),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                SelectionContainer {
+                    Text(
+                        text = report,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .heightIn(max = 260.dp)
+                            .verticalScroll(rememberScrollState())
+                    )
+                }
+            }
         }
     }
 }

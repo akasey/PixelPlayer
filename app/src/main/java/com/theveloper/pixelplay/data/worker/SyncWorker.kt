@@ -26,6 +26,7 @@ import com.theveloper.pixelplay.data.database.SourceType
 import com.theveloper.pixelplay.data.database.TelegramDao // Added
 import com.theveloper.pixelplay.data.database.resolveAlbumArtUri
 import com.theveloper.pixelplay.data.database.serializeArtistRefs
+import com.theveloper.pixelplay.data.diagnostics.PerformanceMetrics
 import com.theveloper.pixelplay.data.model.ArtistRef
 import com.theveloper.pixelplay.data.navidrome.NavidromeRepository
 import com.theveloper.pixelplay.data.media.AudioMetadataReader
@@ -37,7 +38,6 @@ import com.theveloper.pixelplay.utils.AlbumArtCacheManager
 import com.theveloper.pixelplay.utils.AlbumArtUtils
 import com.theveloper.pixelplay.utils.AudioMetaUtils.getAudioMetadata
 import com.theveloper.pixelplay.utils.DirectoryRuleResolver
-import com.theveloper.pixelplay.utils.LocalArtworkUri
 import com.theveloper.pixelplay.utils.buildLocalAudioSelection
 import com.theveloper.pixelplay.utils.normalizeMetadataTextOrEmpty
 import com.theveloper.pixelplay.utils.splitArtistsByDelimiters
@@ -296,6 +296,18 @@ constructor(
                     val endTime = System.currentTimeMillis()
                     Timber.tag(TAG)
                         .i("Synchronization finished successfully in ${endTime - startTime}ms.")
+
+                    // Diagnostics: record scan duration + how many songs were processed this run,
+                    // so the performance report can attribute lag to scanning.
+                    PerformanceMetrics.recordTiming(
+                        PerformanceMetrics.Timings.FULL_SCAN,
+                        endTime - startTime
+                    )
+                    PerformanceMetrics.increment(PerformanceMetrics.Counters.SCAN_RUNS)
+                    PerformanceMetrics.increment(
+                        PerformanceMetrics.Counters.SONGS_SCANNED,
+                        songsToInsert.size.toLong()
+                    )
 
                     // Count total songs for the output
                     val totalSongs = musicDao.getSongCount().first()
@@ -1017,9 +1029,8 @@ constructor(
                         .toString()
 
         var albumArtUriString =
-                AlbumArtUtils.getAlbumArtUri(
+                AlbumArtUtils.getAlbumArtUriForLibraryScan(
                         applicationContext,
-                        raw.filePath,
                         raw.id,
                         forceAlbumArtRefresh
                 )
@@ -1056,7 +1067,7 @@ constructor(
             val file = java.io.File(raw.filePath)
             if (file.exists()) {
                 try {
-                    AudioMetadataReader.read(file)?.let { meta ->
+                    AudioMetadataReader.read(file, readArtwork = false)?.let { meta ->
                         if (!meta.title.isNullOrBlank()) title = meta.title
                         if (!meta.artist.isNullOrBlank()) artist = meta.artist
                         if (!meta.album.isNullOrBlank()) album = meta.album
@@ -1069,9 +1080,6 @@ constructor(
                         if (meta.discNumber != null) discNumber = meta.discNumber
                         if (meta.year != null) year = meta.year
 
-                        meta.artwork?.let { art ->
-                            albumArtUriString = LocalArtworkUri.buildSongUri(raw.id)
-                        }
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to read metadata via TagLib for ${raw.filePath}", e)

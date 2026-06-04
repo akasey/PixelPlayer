@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
@@ -1123,9 +1124,8 @@ private fun FullPlayerControlsSection(
     onRepeatToggle: () -> Unit,
     onFavoriteToggle: () -> Unit
 ) {
-    val stableControlAnimationSpec = remember {
-        tween<Float>(durationMillis = 240, easing = FastOutSlowInEasing)
-    }
+    val motionScheme = remember { MotionScheme.expressive() }
+    val controlSpatialSpec = remember { motionScheme.fastSpatialSpec<Float>() }
     val shouldDelay = loadingTweaks.delayAll || loadingTweaks.delayControls
 
     DelayedContent(
@@ -1159,7 +1159,7 @@ private fun FullPlayerControlsSection(
                 onPlayPause = onPlayPause,
                 onNext = onNext,
                 height = 80.dp,
-                pressAnimationSpec = stableControlAnimationSpec,
+                pressAnimationSpec = controlSpatialSpec,
                 releaseDelay = 220L,
                 colorOtherButtons = transportSkipColors.container,
                 colorPlayPause = transportPlayPauseColors.container,
@@ -1818,6 +1818,7 @@ private fun PlayerProgressBarSection(
                     inactiveTrackColor = inactiveTrackColor,
                     interactionSource = interactionSource,
                     isPlaying = shouldAnimateWavyProgress,
+                    isVisible = isVisible,
                     trackEdgePadding = progressSectionHorizontalInset
                 )
             }
@@ -1845,6 +1846,7 @@ private fun EfficientSlider(
     inactiveTrackColor: Color,
     interactionSource: MutableInteractionSource,
     isPlaying: Boolean,
+    isVisible: Boolean,
     trackEdgePadding: Dp
 ) {
     val haptics = LocalHapticFeedback.current
@@ -1871,6 +1873,7 @@ private fun EfficientSlider(
         inactiveTrackColor = inactiveTrackColor,
         thumbColor = thumbColor,
         isPlaying = isPlaying,
+        isVisible = isVisible,
         trackEdgePadding = trackEdgePadding,
         semanticsLabel = "Playback position",
         modifier = Modifier

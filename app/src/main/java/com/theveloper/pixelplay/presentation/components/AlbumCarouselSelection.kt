@@ -21,6 +21,8 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.flow.first
 
 import com.theveloper.pixelplay.data.preferences.AlbumArtQuality
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MotionScheme
 
 // ====== TIPOS/STATE DEL CARRUSEL (wrapper para mantener compatibilidad) ======
 
@@ -33,7 +35,7 @@ fun rememberRoundedParallaxCarouselState(
 
 // ====== TU SECCIÓN: ACOPLADA AL NUEVO API ======
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AlbumCarouselSection(
     currentSong: Song?,
@@ -63,6 +65,9 @@ fun AlbumCarouselSection(
         initialPage = initialIndex,
         pageCount = { queue.size }
     )
+
+    val motionScheme = remember { MotionScheme.expressive() }
+    val carouselAnimationSpec = remember { motionScheme.defaultSpatialSpec<Float>() }
 
     // Calculate target size based on quality
     val targetSize = remember(albumArtQuality) {
@@ -117,7 +122,7 @@ fun AlbumCarouselSection(
                 }
                 programmaticScrollInProgress = true
                 try {
-                    carouselState.animateScrollToItem(effectiveTargetIndex)
+                    carouselState.animateScrollToItem(effectiveTargetIndex, animationSpec = carouselAnimationSpec)
                 } finally {
                     programmaticScrollInProgress = false
                 }

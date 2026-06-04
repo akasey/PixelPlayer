@@ -134,7 +134,9 @@ data class DeviceCapabilitiesState(
     val formatSupport: List<FormatSupportInfo> = emptyList(),
     val memorySummary: MemorySummary? = null,
     val decoderInfo: ActiveDecoderInfo? = null,
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val isGeneratingReport: Boolean = false,
+    val performanceReport: String? = null
 )
 
 private data class AudioFormatCandidate(
@@ -147,7 +149,8 @@ private data class AudioFormatCandidate(
 class DeviceCapabilitiesViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val engine: DualPlayerEngine,
-    private val musicDao: MusicDao
+    private val musicDao: MusicDao,
+    private val reportCollector: com.theveloper.pixelplay.data.diagnostics.DebugPerformanceReportCollector
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(DeviceCapabilitiesState())
@@ -155,6 +158,32 @@ class DeviceCapabilitiesViewModel @Inject constructor(
 
     init {
         loadCapabilities()
+    }
+
+    /**
+     * Builds the shareable diagnostic performance report on a background dispatcher
+     * and publishes it to [DeviceCapabilitiesState.performanceReport]. The payload
+     * combines the human-readable text with a machine-readable JSON appendix.
+     */
+    fun generatePerformanceReport() {
+        if (_state.value.isGeneratingReport) return
+        _state.value = _state.value.copy(isGeneratingReport = true)
+        viewModelScope.launch {
+            val text = try {
+                val report = reportCollector.generate()
+                buildString {
+                    append(report.toPlainText())
+                    append("\n\n--- JSON ---\n")
+                    append(report.toJson())
+                }
+            } catch (e: Exception) {
+                "Failed to generate performance report: ${e.message}"
+            }
+            _state.value = _state.value.copy(
+                isGeneratingReport = false,
+                performanceReport = text
+            )
+        }
     }
 
     private fun loadCapabilities() {

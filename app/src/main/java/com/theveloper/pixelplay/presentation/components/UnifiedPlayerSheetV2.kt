@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -102,7 +104,7 @@ private data class PlayerUiSheetSliceV2(
  * This path keeps behavior parity, but now owns its own runtime wiring so we can
  * profile and optimize V2 independently while preserving the Experimental switch.
  */
-@androidx.annotation.OptIn(UnstableApi::class)
+@androidx.annotation.OptIn(UnstableApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun UnifiedPlayerSheetV2(
     playerViewModel: PlayerViewModel,
@@ -243,9 +245,8 @@ fun UnifiedPlayerSheetV2(
     val playerContentExpansionFraction = playerViewModel.playerContentExpansionFraction
     val visualOvershootScaleY = remember { Animatable(1f) }
     val initialFullPlayerOffsetY = remember(density) { with(density) { 24.dp.toPx() } }
-    val sheetAnimationSpec = remember {
-        tween<Float>(durationMillis = ANIMATION_DURATION_MS, easing = FastOutSlowInEasing)
-    }
+    val motionScheme = remember { MotionScheme.expressive() }
+    val sheetAnimationSpec = remember { motionScheme.defaultSpatialSpec<Float>() }
     val sheetAnimationMutex = remember { MutatorMutex() }
     val sheetExpandedTargetY = 0f
     val initialY =
@@ -328,18 +329,19 @@ fun UnifiedPlayerSheetV2(
             showPlayerContentArea &&
                 previousSheetState == PlayerSheetState.EXPANDED &&
                 currentSheetContentState == PlayerSheetState.COLLAPSED
-
         previousSheetState = currentSheetContentState
-        animatePlayerSheet(targetExpanded = targetExpanded)
-
+        scope.launch {
+            animatePlayerSheet(targetExpanded = targetExpanded)
+        }
+ 
         if (showPlayerContentArea) {
             scope.launch {
-                visualOvershootScaleY.snapTo(1f)
                 if (targetExpanded) {
+                    visualOvershootScaleY.snapTo(1f)
                     visualOvershootScaleY.animateTo(
                         targetValue = 1f,
                         animationSpec = keyframes {
-                            durationMillis = 50
+                            durationMillis = 250
                             1.0f at 0
                             1.05f at 125
                             1.0f at 250
@@ -590,8 +592,24 @@ fun UnifiedPlayerSheetV2(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .offset { IntOffset(0, visualSheetTranslationYProvider().roundToInt()) }
-            .height(containerHeight),
+            .layout { measurable, constraints ->
+                val translationY = visualSheetTranslationYProvider().roundToInt()
+                val overshoot = if (currentSheetContentState == PlayerSheetState.EXPANDED && !isDragging) {
+                    -translationY
+                } else {
+                    if (translationY < 0) -translationY else 0
+                }
+                val targetHeight = constraints.maxHeight + overshoot
+                val placeable = measurable.measure(
+                    constraints.copy(
+                        minHeight = targetHeight,
+                        maxHeight = targetHeight
+                    )
+                )
+                layout(constraints.maxWidth, constraints.maxHeight) {
+                    placeable.placeRelative(0, translationY)
+                }
+            },
         shadowElevation = 0.dp,
         color = Color.Transparent
     ) {

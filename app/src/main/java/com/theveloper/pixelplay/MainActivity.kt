@@ -865,9 +865,10 @@ class MainActivity : ComponentActivity() {
                                         // animating the radius re-clips this layer only — no
                                         // recomposition and no layout pass for the bar.
                                         val fraction = playerViewModel.playerContentExpansionFraction.value
+                                        val safeFraction = fraction.coerceIn(0f, 1f)
                                         val topDp = when {
                                             navBarStyle == NavBarStyle.DEFAULT -> animatedDefaultTopCornerRadius.value
-                                            navBarStyle == NavBarStyle.FULL_WIDTH -> lerp(navBarCornerRadius.dp, 26.dp, fraction)
+                                            navBarStyle == NavBarStyle.FULL_WIDTH -> lerp(navBarCornerRadius.dp, 26.dp, safeFraction)
                                             showPlayerContentArea -> if (fraction < 0.2f) {
                                                 lerp(navBarCornerRadius.dp, 26.dp, (fraction / 0.2f).coerceIn(0f, 1f))
                                             } else {
