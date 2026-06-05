@@ -69,6 +69,7 @@
     <string name="setcat_language_french">Français</string>
     <string name="setcat_language_russian">Russe</string>
     <string name="setcat_language_italian">Italien</string>
+    <string name="setcat_language_turkish">Turc</string>
     <string name="setcat_language_korean">Coréen</string>
     <string name="setcat_language_norwegian_bokmal">Norvégien (Bokmål)</string>
     <string name="setcat_app_theme_label">Thème de l\'application</string>

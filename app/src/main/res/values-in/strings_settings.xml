@@ -136,6 +136,7 @@
     <string name="setcat_language_chinese">Tionghoa (Sederhana)</string>
     <string name="setcat_language_indonesian">Indonesia</string>
     <string name="setcat_language_italian">Italia</string>
+    <string name="setcat_language_turkish">Turki</string>
     <string name="setcat_app_theme_label">Tema Aplikasi</string>
     <string
         name="setcat_app_theme_desc"

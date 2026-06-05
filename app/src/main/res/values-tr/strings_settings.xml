@@ -112,14 +112,15 @@
         name="setcat_language_desc"
     >Uygulama arayüzünde kullanılacak dili seçin.</string>
     <string name="setcat_language_system">Sistem varsayılanı</string>
-    <string name="setcat_language_english">English (İngilizce)</string>
-    <string name="setcat_language_spanish">Español (İspanyolca)</string>
-    <string name="setcat_language_german">Deutsch (Almanca)</string>
-    <string name="setcat_language_french">Français (Fransızca)</string>
-    <string name="setcat_language_russian">Русский (Rusça)</string>
-    <string name="setcat_language_chinese">简体中文 (Basitleştirilmiş Çince)</string>
-    <string name="setcat_language_indonesian">Bahasa Indonesia (Endonezce)</string>
-    <string name="setcat_language_italian">Italiano (İtalyanca)</string>
+    <string name="setcat_language_english">İngilizce</string>
+    <string name="setcat_language_spanish">İspanyolca</string>
+    <string name="setcat_language_german">Almanca</string>
+    <string name="setcat_language_french">Fransızca</string>
+    <string name="setcat_language_russian">Rusça</string>
+    <string name="setcat_language_chinese">Basitleştirilmiş Çince</string>
+    <string name="setcat_language_indonesian">Endonezce</string>
+    <string name="setcat_language_italian">İtalyanca</string>
+    <string name="setcat_language_turkish">Türkçe</string>
     <string name="setcat_app_theme_label">Uygulama Teması</string>
     <string
         name="setcat_app_theme_desc"

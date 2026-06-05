@@ -134,6 +134,7 @@
     <string name="setcat_language_chinese">Chino (simplificado)</string>
     <string name="setcat_language_indonesian">Indonesio</string>
     <string name="setcat_language_italian">Italiano</string>
+    <string name="setcat_language_turkish">Turco</string>
     <string name="setcat_app_theme_label">Tema de la app</string>
     <string
         name="setcat_app_theme_desc"
