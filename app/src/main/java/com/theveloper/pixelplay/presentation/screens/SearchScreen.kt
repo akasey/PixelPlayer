@@ -1705,10 +1705,18 @@ fun SearchFilterChip(
 ) {
     val selected = filterType == currentFilter
 
+    val labelResId = when (filterType) {
+        SearchFilterType.ALL -> R.string.common_all
+        SearchFilterType.SONGS -> R.string.library_tab_songs
+        SearchFilterType.ALBUMS -> R.string.library_tab_albums
+        SearchFilterType.ARTISTS -> R.string.library_tab_artists
+        SearchFilterType.PLAYLISTS -> R.string.library_tab_playlists
+    }
+
     FilterChip(
         selected = selected,
         onClick = { playerViewModel.updateSearchFilter(filterType) },
-        label = { Text(filterType.name.lowercase().replaceFirstChar { it.titlecase() }) },
+        label = { Text(stringResource(labelResId)) },
         modifier = modifier,
         shape = CircleShape,
         border = BorderStroke(

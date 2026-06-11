@@ -71,6 +71,7 @@
     <string name="common_error">Ошибка</string>
     <string name="common_search">Поиск</string>
     <string name="common_clear_search">Очистить поиск</string>
+    <string name="common_all">Все</string>
     <string name="common_confirm">Подтвердить</string>
     <string name="common_saved">Сохранено!</string>
     <string name="common_selected">Выбрано</string>

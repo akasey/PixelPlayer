@@ -130,7 +130,7 @@
     <string name="lyrics_title">Lirik</string>
     <string name="lyrics_loading">Memuat lirik…</string>
     <string name="lyrics_mode_synced">Synced</string>
-    <string name="lyrics_mode_static">Biasa</string>
+    <string name="lyrics_mode_static">Statis</string>
     <string name="lyrics_options">Opsi lirik</string>
     <string name="lyrics_offset_minus_half">−.5</string>
     <string name="lyrics_offset_minus_point_one">−.1</string>
@@ -153,7 +153,7 @@
 
     <!-- LyricsMoreBottomSheet -->
     <string name="lyrics_save_title">Simpan Lirik</string>
-    <string name="lyrics_translate_via_ai">Terjemahkan lewat AI</string>
+    <string name="lyrics_translate_via_ai">Terjemahkan via AI</string>
     <string name="lyrics_translate_already_translated">Lirik ini sudah memiliki terjemahan</string>
     <string name="lyrics_translate_already_in_target_language">Lirik ini sudah dalam bahasa tersebut</string>
     <string name="lyrics_translate_api_not_configured">API belum dikonfigurasi</string>

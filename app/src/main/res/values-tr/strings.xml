@@ -71,6 +71,7 @@
     <string name="common_error">Hata</string>
     <string name="common_search">Ara</string>
     <string name="common_clear_search">Aramayı temizle</string>
+    <string name="common_all">Tümü</string>
     <string name="common_confirm">Onayla</string>
     <string name="common_saved">Kaydedildi!</string>
     <string name="common_selected">Seçildi</string>

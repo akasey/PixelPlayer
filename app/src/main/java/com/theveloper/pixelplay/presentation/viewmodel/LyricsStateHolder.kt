@@ -343,12 +343,6 @@ class LyricsStateHolder @Inject constructor(
      */
     fun translateLyricsViaAi(currentSong: Song, lyricsObj: Lyrics?, cb: LyricsTranslationCallbacks) {
         val songId = currentSong.id.toLongOrNull() ?: return
-        val rawLyrics = currentSong.lyrics
-
-        if (rawLyrics.isNullOrBlank()) {
-            _messageEvents.tryEmit(cb.getString(R.string.lyrics_not_found))
-            return
-        }
 
         if (lyricsObj?.synced != null) {
             val hasValidTranslation = lyricsObj.synced.any { !it.translation.isNullOrBlank() }
@@ -360,6 +354,19 @@ class LyricsStateHolder @Inject constructor(
 
         scope?.launch {
             _messageEvents.emit(cb.getString(R.string.lyrics_translate_progress))
+
+            val rawLyrics = withContext(Dispatchers.IO) {
+                currentSong.lyrics?.takeIf { it.isNotBlank() }
+                    ?: readLocalLyricsFile(currentSong)
+                    ?: readEmbeddedLyricsFromFile(currentSong)
+                    ?: musicRepository.getStoredLyrics(currentSong)?.second
+            }
+
+            if (rawLyrics.isNullOrBlank()) {
+                _messageEvents.emit(cb.getString(R.string.lyrics_not_found))
+                return@launch
+            }
+
             val result = cb.translate(rawLyrics)
             result.onSuccess { translatedText ->
                 if (translatedText.trim() == "ALREADY_IN_TARGET_LANGUAGE") {

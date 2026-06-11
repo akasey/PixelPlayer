@@ -193,6 +193,9 @@
     <string name="multi_selection_albums_selected">terpilih</string>
     <string name="multi_selection_albums_selected_limit">Batas: %1$d album per pilihan.</string>
     <string name="multi_selection_albums_queue_hint">Antrekan + putar menghormati urutan pilihan Anda.</string>
+    <string name="multi_selection_genres_count_upper">%1$d GENRE</string>
+    <string name="multi_selection_genres_selected">terpilih</string>
+    <string name="multi_selection_genres_queue_hint">Lakukan operasi batch pada semua lagu dalam genre ini.</string>
 
     <!-- Sort Option Display Names -->
     <string name="sort_display_default_order">Urutan Default</string>

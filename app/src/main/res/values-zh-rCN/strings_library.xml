@@ -193,6 +193,9 @@
     <string name="multi_selection_albums_selected">已选择</string>
     <string name="multi_selection_albums_selected_limit">限制：每次选择最多 %1$d 张专辑。</string>
     <string name="multi_selection_albums_queue_hint">加入队列及播放将遵循您的选择顺序。</string>
+    <string name="multi_selection_genres_count_upper">%1$d 个流派</string>
+    <string name="multi_selection_genres_selected">已选择</string>
+    <string name="multi_selection_genres_queue_hint">对这些流派中的所有歌曲进行批量操作。</string>
 
     <!-- Sort Option Display Names -->
     <string name="sort_display_default_order">默认顺序</string>

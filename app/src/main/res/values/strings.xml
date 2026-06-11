@@ -71,6 +71,7 @@
     <string name="common_error">Error</string>
     <string name="common_search">Search</string>
     <string name="common_clear_search">Clear search</string>
+    <string name="common_all">All</string>
     <string name="common_confirm">Confirm</string>
     <string name="common_saved">Saved!</string>
     <string name="common_selected">Selected</string>

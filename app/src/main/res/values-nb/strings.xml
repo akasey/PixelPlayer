@@ -71,6 +71,7 @@
     <string name="common_error">Feil</string>
     <string name="common_search">Søk</string>
     <string name="common_clear_search">Tøm søk</string>
+    <string name="common_all">Alle</string>
     <string name="common_confirm">Bekreft</string>
     <string name="common_saved">Lagret!</string>
     <string name="common_selected">Valgt</string>

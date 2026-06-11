@@ -71,6 +71,7 @@
     <string name="common_error">오류</string>
     <string name="common_search">검색</string>
     <string name="common_clear_search">검색 지우기</string>
+    <string name="common_all">전체</string>
     <string name="common_confirm">확인</string>
     <string name="common_saved">저장됨!</string>
     <string name="common_selected">선택됨</string>

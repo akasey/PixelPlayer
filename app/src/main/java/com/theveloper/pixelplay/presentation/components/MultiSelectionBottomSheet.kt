@@ -270,16 +270,16 @@ fun MultiSelectionBottomSheet(
                             ) {
                                 Icon(
                                     Icons.Rounded.PlayArrow,
-                                    contentDescription = stringResource(R.string.song_info_action_play_all),
+                                    contentDescription = stringResource(R.string.song_info_cd_play_all),
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 TightWrapText(
-                                    text = stringResource(R.string.song_info_cd_play_all),
+                                    text = stringResource(R.string.song_info_action_play_all),
                                     modifier = Modifier.padding(end = 4.dp),
                                     overflow = TextOverflow.Ellipsis,
                                     maxLines = 2,
                                     lineHeight = 22.sp,
-                                    style = MaterialTheme.typography.titleMediumEmphasized
+                                    style = MaterialTheme.typography.titleLarge
                                 )
                             }
                             // Like/Unlike toggle button
