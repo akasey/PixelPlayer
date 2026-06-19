@@ -125,4 +125,6 @@
     <string name="common_play_album">Album abspielen</string>
     <string name="common_shuffle_play_album">Album zufällig abspielen</string>
     <string name="common_album_art_for_title">Cover für %1$s</string>
+    <string name="settings_pause_on_volume_zero">Pausieren, wenn Lautstärke null erreicht</string>
+    <string name="settings_pause_on_volume_zero_desc">Wiedergabe automatisch pausieren, wenn die Lautstärke auf 0 gesetzt wird</string>
 </resources>

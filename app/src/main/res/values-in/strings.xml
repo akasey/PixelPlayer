@@ -125,4 +125,6 @@
     <string name="common_play_album">Putar album</string>
     <string name="common_shuffle_play_album">Putar acak album</string>
     <string name="common_album_art_for_title">Sampul album untuk %1$s</string>
+    <string name="settings_pause_on_volume_zero">Jeda saat volume mencapai nol</string>
+    <string name="settings_pause_on_volume_zero_desc">Otomatis menjeda pemutaran saat volume diatur ke 0</string>
 </resources>

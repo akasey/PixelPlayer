@@ -125,4 +125,6 @@
     <string name="common_play_album">앨범 재생</string>
     <string name="common_shuffle_play_album">앨범 셔플 재생</string>
     <string name="common_album_art_for_title">%1$s의 앨범 아트</string>
+    <string name="settings_pause_on_volume_zero">볼륨이 0이 되면 일시정지</string>
+    <string name="settings_pause_on_volume_zero_desc">볼륨이 0으로 설정되면 자동으로 재생을 일시정지합니다</string>
 </resources>

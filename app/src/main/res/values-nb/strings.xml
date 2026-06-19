@@ -125,4 +125,6 @@
     <string name="common_play_album">Spill album</string>
     <string name="common_shuffle_play_album">Bland album</string>
     <string name="common_album_art_for_title">Albumkunst for %1$s</string>
+    <string name="settings_pause_on_volume_zero">Sett på pause når volumet er null</string>
+    <string name="settings_pause_on_volume_zero_desc">Sett automatisk avspillingen på pause når volumet settes til 0</string>
 </resources>

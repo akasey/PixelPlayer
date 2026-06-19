@@ -125,4 +125,6 @@
     <string name="common_play_album">Riproduci album</string>
     <string name="common_shuffle_play_album">Riproduzione casuale album</string>
     <string name="common_album_art_for_title">Copertina album per %1$s</string>
+    <string name="settings_pause_on_volume_zero">Metti in pausa quando il volume raggiunge zero</string>
+    <string name="settings_pause_on_volume_zero_desc">Metti automaticamente in pausa la riproduzione quando il volume è 0</string>
 </resources>

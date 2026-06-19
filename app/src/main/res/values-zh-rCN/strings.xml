@@ -125,4 +125,6 @@
     <string name="common_play_album">播放专辑</string>
     <string name="common_shuffle_play_album">随机播放专辑</string>
     <string name="common_album_art_for_title">%1$s 的专辑封面</string>
+    <string name="settings_pause_on_volume_zero">音量为零时暂停</string>
+    <string name="settings_pause_on_volume_zero_desc">当音量设置为 0 时自动暂停播放</string>
 </resources>

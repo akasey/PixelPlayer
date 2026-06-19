@@ -244,4 +244,6 @@
     <string name="batch_edit_remove_all_art">إزالة جميع أغلفة الألبومات</string>
     <string name="batch_edit_multiple_covers">(أغلفة متعددة مختلفة)</string>
     <string name="player_playback_error">خطأ في التشغيل: %1$s</string>
+    <string name="settings_pause_on_volume_zero">إيقاف مؤقت عند وصول مستوى الصوت إلى الصفر</string>
+    <string name="settings_pause_on_volume_zero_desc">إيقاف التشغيل تلقائيًا مؤقتًا عندما يكون مستوى الصوت 0</string>
 </resources>
