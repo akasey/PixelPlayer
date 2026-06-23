@@ -1,0 +1,2 @@
+# gomobile emits a sources jar alongside the AAR; we only need the AAR.
+*-sources.jar

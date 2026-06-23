@@ -8,6 +8,7 @@ import coil.fetch.SourceResult
 import coil.request.Options
 import com.theveloper.pixelplay.data.navidrome.NavidromeRepository
 import com.theveloper.pixelplay.data.network.navidrome.NavidromeApiService
+import com.theveloper.pixelplay.di.NavidromeOkHttpClient
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okio.Path.Companion.toPath
@@ -152,7 +153,7 @@ class NavidromeCoilFetcher(
      */
     class Factory @Inject constructor(
         private val repository: NavidromeRepository,
-        private val okHttpClient: OkHttpClient
+        @NavidromeOkHttpClient private val okHttpClient: OkHttpClient
     ) : Fetcher.Factory<Uri> {
 
         private var cacheDir: File? = null

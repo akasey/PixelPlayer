@@ -251,6 +251,9 @@ class UserPreferencesRepository @Inject constructor(
         val NAVIDROME_MAX_CACHE_SIZE_MB = intPreferencesKey("navidrome_max_cache_size_mb")
         val NAVIDROME_AUTO_DOWNLOAD_THRESHOLD = intPreferencesKey("navidrome_auto_download_threshold")
         val NAVIDROME_AUTO_DOWNLOAD_WIFI_ONLY = booleanPreferencesKey("navidrome_auto_download_wifi_only")
+
+        // Navidrome application-layer WireGuard tunnel
+        val NAVIDROME_TUNNEL_ENABLED = booleanPreferencesKey("navidrome_tunnel_enabled")
     }
 
     // ─── Private helpers ─────────────────────────────────────────────────────
@@ -1388,6 +1391,14 @@ suspend fun markDirectoryRulesVersionApplied(version: Int) {
 
     suspend fun setNavidromeAutoDownloadWifiOnly(wifiOnly: Boolean) {
         dataStore.edit { it[PreferencesKeys.NAVIDROME_AUTO_DOWNLOAD_WIFI_ONLY] = wifiOnly }
+    }
+
+    /** Whether Navidrome traffic is routed through the application-layer WireGuard tunnel. */
+    val navidromeTunnelEnabledFlow: Flow<Boolean> =
+        pref { it[PreferencesKeys.NAVIDROME_TUNNEL_ENABLED] ?: false }
+
+    suspend fun setNavidromeTunnelEnabled(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.NAVIDROME_TUNNEL_ENABLED] = enabled }
     }
 
     // ─── Companion ────────────────────────────────────────────────────────────

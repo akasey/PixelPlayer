@@ -6,7 +6,6 @@ import androidx.core.net.toUri
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.cache.CacheDataSink
 import androidx.media3.datasource.cache.CacheDataSource
@@ -42,7 +41,10 @@ class NavidromeCacheManager @Inject constructor(
     private val navidromeDao: NavidromeDao,
     private val navidromeRepository: NavidromeRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
-    private val connectivityStateHolder: ConnectivityStateHolder
+    private val connectivityStateHolder: ConnectivityStateHolder,
+    private val tunnelManager: com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardTunnelManager,
+    @com.theveloper.pixelplay.di.NavidromeOkHttpClient
+    private val navidromeOkHttpClient: okhttp3.OkHttpClient
 ) {
     private companion object {
         private const val TAG = "NavidromeCacheManager"
@@ -73,7 +75,7 @@ class NavidromeCacheManager @Inject constructor(
         when {
             uri.scheme == "navidrome" -> uri.toString()
             !dataSpec.key.isNullOrEmpty() -> dataSpec.key!!
-            else -> DataSpec.NO_KEY
+            else -> dataSpec.uri.toString()
         }
     }
 
@@ -114,6 +116,9 @@ class NavidromeCacheManager @Inject constructor(
             return@withContext
         }
 
+        // Ensure the WireGuard tunnel is up (when enabled) before downloading from the server.
+        tunnelManager.ensureReady()
+
         val streamUrl = runCatching { navidromeRepository.getStreamUrl(navidromeId) }
             .getOrElse { e ->
                 Timber.tag(TAG).e(e, "downloadSong: failed to get stream URL for %s", navidromeId)
@@ -126,12 +131,14 @@ class NavidromeCacheManager @Inject constructor(
             .setKey(cacheKey)
             .build()
 
-        val httpDataSource = DefaultHttpDataSource.Factory().createDataSource()
+        // Use the Navidrome OkHttp client so downloads honor the WireGuard tunnel when enabled.
+        val httpDataSource = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(navidromeOkHttpClient)
+            .createDataSource()
         val cacheDataSource = CacheDataSource(
             simpleCache,
             httpDataSource,
             FileDataSource(),
-            CacheDataSink(simpleCache, CacheDataSink.DEFAULT_BUFFER_SIZE),
+            CacheDataSink(simpleCache, CacheDataSink.DEFAULT_FRAGMENT_SIZE),
             CacheDataSource.FLAG_BLOCK_ON_CACHE or CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR,
             null
         )

@@ -23,6 +23,8 @@ import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,11 +37,15 @@ import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.database.NavidromeCacheEntryEntity
 import com.theveloper.pixelplay.data.database.NavidromePlaylistEntity
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.navidrome.tunnel.TunnelState
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import com.theveloper.pixelplay.utils.formatTimeAgo
@@ -271,6 +277,8 @@ private fun DashboardContent(
         }
 
         SubsonicMenuCard(isSyncing = isSyncing, onSyncAll = onSyncAll, onLogout = onLogout, cardShape = cardShape)
+
+        NavidromeTunnelCard(cardShape = cardShape)
 
         Spacer(modifier = Modifier.height(4.dp))
 
@@ -675,6 +683,171 @@ private fun SubsonicMenuCard(
             }
         }
     }
+}
+
+@Composable
+private fun NavidromeTunnelCard(
+    cardShape: AbsoluteSmoothCornerShape,
+    viewModel: NavidromeTunnelViewModel = hiltViewModel()
+) {
+    val context = LocalContext.current
+    val enabled by viewModel.enabled.collectAsStateWithLifecycle()
+    val endpoint by viewModel.endpoint.collectAsStateWithLifecycle()
+    val tunnelState by viewModel.tunnelState.collectAsStateWithLifecycle()
+    val importError by viewModel.importError.collectAsStateWithLifecycle()
+    val testResult by viewModel.testResult.collectAsStateWithLifecycle()
+
+    val pickConf = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            }.getOrNull()
+            if (text.isNullOrBlank()) {
+                viewModel.importConfig("") // surfaces an error
+            } else {
+                viewModel.importConfig(text)
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = cardShape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Private tunnel (WireGuard)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Route Navidrome traffic through an app-only WireGuard tunnel to reach a " +
+                    "private server. No system VPN is used.",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (!viewModel.isSupported) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "This build does not include the WireGuard engine. Rebuild with " +
+                        "-Ppixelplay.enableWireguard=true after running tools/wireguard/build-aar.sh.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    fontFamily = GoogleSansRounded
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Enable tunnel",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontFamily = GoogleSansRounded
+                    )
+                    Text(
+                        text = endpoint?.let { "Endpoint: $it" } ?: "No config imported",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = GoogleSansRounded,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { viewModel.setEnabled(it) },
+                    enabled = endpoint != null && viewModel.isSupported
+                )
+            }
+
+            // Live connection state.
+            val stateLabel = when (val s = tunnelState) {
+                is TunnelState.Down -> "Disconnected"
+                is TunnelState.Connecting -> "Connecting…"
+                is TunnelState.Up -> "Connected (SOCKS :${s.socksPort})"
+                is TunnelState.Error -> "Error: ${s.message}"
+            }
+            val stateColor = when (tunnelState) {
+                is TunnelState.Up -> MaterialTheme.colorScheme.primary
+                is TunnelState.Error -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stateLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = stateColor,
+                fontFamily = GoogleSansRounded
+            )
+
+            importError?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    fontFamily = GoogleSansRounded
+                )
+            }
+            when (val r = testResult) {
+                is TunnelTestResult.Running -> TunnelTestLine("Testing…", MaterialTheme.colorScheme.onSurfaceVariant)
+                is TunnelTestResult.Success -> TunnelTestLine("Test succeeded", MaterialTheme.colorScheme.primary)
+                is TunnelTestResult.Failure -> TunnelTestLine("Test failed: ${r.message}", MaterialTheme.colorScheme.error)
+                TunnelTestResult.Idle -> {}
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = { pickConf.launch(arrayOf("*/*")) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Upload .conf", fontFamily = GoogleSansRounded)
+                }
+                FilledTonalButton(
+                    onClick = { viewModel.testTunnel() },
+                    enabled = endpoint != null,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Rounded.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Test", fontFamily = GoogleSansRounded)
+                }
+            }
+            if (endpoint != null) {
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { viewModel.clearConfig() }) {
+                    Text("Remove config", color = MaterialTheme.colorScheme.error, fontFamily = GoogleSansRounded)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TunnelTestLine(text: String, color: Color) {
+    Spacer(Modifier.height(4.dp))
+    Text(text = text, style = MaterialTheme.typography.bodySmall, color = color, fontFamily = GoogleSansRounded)
 }
 
 @Composable

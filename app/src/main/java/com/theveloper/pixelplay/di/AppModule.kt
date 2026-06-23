@@ -481,6 +481,54 @@ object AppModule {
     }
 
     /**
+     * Selects which userspace WireGuard engine backs the Navidrome tunnel.
+     * Uses the real netstack engine when the feature is enabled at build time; otherwise a no-op
+     * that always reports the engine as unavailable.
+     */
+    @Provides
+    @Singleton
+    fun provideWireGuardTunnel(
+        netstack: javax.inject.Provider<com.theveloper.pixelplay.data.navidrome.tunnel.NetstackWireGuardTunnel>,
+        noOp: javax.inject.Provider<com.theveloper.pixelplay.data.navidrome.tunnel.NoOpWireGuardTunnel>
+    ): com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardTunnel =
+        if (BuildConfig.ENABLE_WIREGUARD) netstack.get() else noOp.get()
+
+    /**
+     * Navidrome-specific OkHttpClient. Shares the base connection pool/dispatcher but applies a
+     * dynamic [java.net.ProxySelector] that returns the live WireGuard SOCKS5 proxy when the
+     * tunnel is up (remote DNS is handled by the SOCKS server), and falls back to a direct
+     * connection otherwise. Used by the Navidrome API, stream proxy, cover-art fetcher, and the
+     * offline-download path so all Navidrome traffic can be tunneled.
+     */
+    @Provides
+    @Singleton
+    @NavidromeOkHttpClient
+    fun provideNavidromeOkHttpClient(
+        baseOkHttpClient: OkHttpClient,
+        tunnelManager: com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardTunnelManager
+    ): OkHttpClient {
+        val proxySelector = object : java.net.ProxySelector() {
+            override fun select(uri: java.net.URI?): MutableList<java.net.Proxy> =
+                mutableListOf(tunnelManager.socksProxy() ?: java.net.Proxy.NO_PROXY)
+
+            override fun connectFailed(
+                uri: java.net.URI?,
+                sa: java.net.SocketAddress?,
+                ioe: java.io.IOException?
+            ) {
+                timber.log.Timber.w(ioe, "Navidrome proxy connect failed for $uri via $sa")
+            }
+        }
+
+        return baseOkHttpClient.newBuilder()
+            .proxySelector(proxySelector)
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS) // longer for streaming
+            .writeTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
+    /**
      * Provee una instancia de OkHttpClient con timeouts para búsquedas de lyrics.
      * Includes DNS resolver, modern TLS, connection pool, and connection retry.
      */
