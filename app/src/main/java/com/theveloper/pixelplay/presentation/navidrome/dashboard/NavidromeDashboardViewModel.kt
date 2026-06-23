@@ -8,24 +8,57 @@ import androidx.work.WorkManager
 import com.theveloper.pixelplay.data.database.NavidromeCacheEntryEntity
 import com.theveloper.pixelplay.data.database.NavidromePlaylistEntity
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.navidrome.CacheUsage
 import com.theveloper.pixelplay.data.navidrome.NavidromeCacheManager
 import com.theveloper.pixelplay.data.navidrome.NavidromeRepository
+import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.data.worker.NavidromeSyncWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
 class NavidromeDashboardViewModel @Inject constructor(
     private val repository: NavidromeRepository,
     private val navCacheManager: NavidromeCacheManager,
+    private val userPreferencesRepository: UserPreferencesRepository,
     private val workManager: WorkManager
 ) : ViewModel() {
+
+    /** Configured max streaming-cache size in MB (applies on next app start). */
+    val maxCacheSizeMb: StateFlow<Int> = userPreferencesRepository.navidromeMaxCacheSizeMbFlow
+        .stateIn(viewModelScope, SharingStarted.Lazily, 500)
+
+    private val _cacheUsage = MutableStateFlow(CacheUsage(0L, 0L))
+    val cacheUsage: StateFlow<CacheUsage> = _cacheUsage.asStateFlow()
+
+    init {
+        refreshCacheUsage()
+    }
+
+    fun setMaxCacheSizeMb(sizeMb: Int) {
+        viewModelScope.launch { userPreferencesRepository.setNavidromeMaxCacheSizeMb(sizeMb) }
+    }
+
+    fun refreshCacheUsage() {
+        viewModelScope.launch {
+            _cacheUsage.value = withContext(Dispatchers.IO) { navCacheManager.cacheUsageBytes() }
+        }
+    }
+
+    fun clearStreamingCache() {
+        viewModelScope.launch {
+            navCacheManager.clearStreamingCache()
+            refreshCacheUsage()
+        }
+    }
 
     val playlists: StateFlow<List<NavidromePlaylistEntity>> = repository.getPlaylists()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())

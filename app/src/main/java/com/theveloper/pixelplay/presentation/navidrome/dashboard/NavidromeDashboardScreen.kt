@@ -8,6 +8,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -64,8 +66,9 @@ fun NavidromeDashboardScreen(
     val syncProgress by viewModel.syncProgress.collectAsStateWithLifecycle()
     val syncMessage by viewModel.syncMessage.collectAsStateWithLifecycle()
     val selectedPlaylistSongs by viewModel.selectedPlaylistSongs.collectAsStateWithLifecycle()
-    val downloadedSongs by viewModel.downloadedSongs.collectAsStateWithLifecycle()
     val downloadingIds by viewModel.downloadingIds.collectAsStateWithLifecycle()
+    val maxCacheSizeMb by viewModel.maxCacheSizeMb.collectAsStateWithLifecycle()
+    val cacheUsage by viewModel.cacheUsage.collectAsStateWithLifecycle()
 
     val cardShape = AbsoluteSmoothCornerShape(
         cornerRadiusTR = 20.dp, cornerRadiusTL = 20.dp,
@@ -113,14 +116,16 @@ fun NavidromeDashboardScreen(
             username = viewModel.username,
             lastSyncTime = viewModel.lastSyncTime,
             selectedPlaylistSongs = selectedPlaylistSongs,
-            downloadedSongs = downloadedSongs,
             downloadingIds = downloadingIds,
+            maxCacheSizeMb = maxCacheSizeMb,
+            cacheUsage = cacheUsage,
+            onSetMaxCacheSizeMb = { viewModel.setMaxCacheSizeMb(it) },
+            onClearStreamingCache = { viewModel.clearStreamingCache() },
             onSyncAll = { viewModel.syncAllPlaylistsAndSongs() },
             onSyncPlaylist = { viewModel.syncPlaylistSongs(it) },
             onDeletePlaylist = { viewModel.deletePlaylist(it) },
             onLoadPlaylistSongs = { viewModel.loadPlaylistSongs(it) },
             onDownloadSong = { viewModel.downloadSong(it) },
-            onRemoveSong = { viewModel.removeSong(it) },
             isCached = { viewModel.isCached(it) },
             onLogout = {
                 viewModel.logout()
@@ -141,26 +146,28 @@ private fun DashboardContent(
     username: String?,
     lastSyncTime: Long,
     selectedPlaylistSongs: List<Song>,
-    downloadedSongs: List<NavidromeCacheEntryEntity>,
     downloadingIds: Set<String>,
+    maxCacheSizeMb: Int,
+    cacheUsage: com.theveloper.pixelplay.data.navidrome.CacheUsage,
+    onSetMaxCacheSizeMb: (Int) -> Unit,
+    onClearStreamingCache: () -> Unit,
     onSyncAll: () -> Unit,
     onSyncPlaylist: (String) -> Unit,
     onDeletePlaylist: (String) -> Unit,
     onLoadPlaylistSongs: (String) -> Unit,
     onDownloadSong: (String) -> Unit,
-    onRemoveSong: (String) -> Unit,
     isCached: (String) -> Boolean,
     onLogout: () -> Unit,
     cardShape: AbsoluteSmoothCornerShape,
     paddingValues: PaddingValues
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
     var expandedPlaylistId by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(paddingValues)
+            .verticalScroll(rememberScrollState())
     ) {
         // Sync status banner
         AnimatedVisibility(
@@ -280,68 +287,34 @@ private fun DashboardContent(
 
         NavidromeTunnelCard(cardShape = cardShape)
 
+        NavidromeCacheCard(
+            maxCacheSizeMb = maxCacheSizeMb,
+            cacheUsage = cacheUsage,
+            onSetMaxCacheSizeMb = onSetMaxCacheSizeMb,
+            onClearStreamingCache = onClearStreamingCache,
+            cardShape = cardShape,
+        )
+
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Tab row: Playlists | Downloads
-        TabRow(
-            selectedTabIndex = selectedTab,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            contentColor = MaterialTheme.colorScheme.primary
-        ) {
-            Tab(
-                selected = selectedTab == 0,
-                onClick = { selectedTab = 0 },
-                text = {
-                    Text(
-                        stringResource(R.string.cloud_dashboard_title_playlists),
-                        fontFamily = GoogleSansRounded,
-                        fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal
-                    )
-                }
-            )
-            Tab(
-                selected = selectedTab == 1,
-                onClick = { selectedTab = 1 },
-                text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "Downloads",
-                            fontFamily = GoogleSansRounded,
-                            fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal
-                        )
-                        if (downloadedSongs.isNotEmpty()) {
-                            Spacer(Modifier.width(6.dp))
-                            Badge { Text("${downloadedSongs.size}") }
-                        }
-                    }
-                }
-            )
-        }
-
-        when (selectedTab) {
-            0 -> PlaylistsTab(
-                playlists = playlists,
-                isSyncing = isSyncing,
-                selectedPlaylistSongs = selectedPlaylistSongs,
-                expandedPlaylistId = expandedPlaylistId,
-                downloadingIds = downloadingIds,
-                onPlaylistClick = { playlistId ->
-                    expandedPlaylistId = if (expandedPlaylistId == playlistId) null else playlistId
-                    if (expandedPlaylistId != null) onLoadPlaylistSongs(playlistId)
-                },
-                onSyncPlaylist = onSyncPlaylist,
-                onDeletePlaylist = onDeletePlaylist,
-                onDownloadSong = onDownloadSong,
-                isCached = isCached,
-                onSyncAll = onSyncAll,
-                cardShape = cardShape
-            )
-            1 -> DownloadsTab(
-                downloadedSongs = downloadedSongs,
-                onRemoveSong = onRemoveSong,
-                cardShape = cardShape
-            )
-        }
+        // Downloaded songs now live in their own top-level Library → Downloads screen.
+        PlaylistsTab(
+            playlists = playlists,
+            isSyncing = isSyncing,
+            selectedPlaylistSongs = selectedPlaylistSongs,
+            expandedPlaylistId = expandedPlaylistId,
+            downloadingIds = downloadingIds,
+            onPlaylistClick = { playlistId ->
+                expandedPlaylistId = if (expandedPlaylistId == playlistId) null else playlistId
+                if (expandedPlaylistId != null) onLoadPlaylistSongs(playlistId)
+            },
+            onSyncPlaylist = onSyncPlaylist,
+            onDeletePlaylist = onDeletePlaylist,
+            onDownloadSong = onDownloadSong,
+            isCached = isCached,
+            onSyncAll = onSyncAll,
+            cardShape = cardShape
+        )
     }
 }
 
@@ -391,34 +364,36 @@ private fun PlaylistsTab(
             }
         }
     } else {
-        LazyColumn(
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        // Regular Column (not LazyColumn) so the whole dashboard scrolls as one surface;
+        // a dashboard only ever shows a handful of playlists.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (playlists.isEmpty()) {
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = stringResource(R.string.cloud_dashboard_title_playlists),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontFamily = GoogleSansRounded,
-                            fontWeight = FontWeight.Bold
-                        )
-                        TextButton(onClick = onSyncAll) {
-                            Icon(Icons.Rounded.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(stringResource(R.string.cloud_dashboard_action_sync), fontFamily = GoogleSansRounded)
-                        }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.cloud_dashboard_title_playlists),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = GoogleSansRounded,
+                        fontWeight = FontWeight.Bold
+                    )
+                    TextButton(onClick = onSyncAll) {
+                        Icon(Icons.Rounded.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.cloud_dashboard_action_sync), fontFamily = GoogleSansRounded)
                     }
                 }
             }
-            items(items = playlists, key = { it.id }) { playlist ->
+            playlists.forEach { playlist ->
                 PlaylistCard(
                     playlist = playlist,
                     onSyncClick = { onSyncPlaylist(playlist.id) },
@@ -442,171 +417,6 @@ private fun PlaylistsTab(
                         Spacer(Modifier.height(4.dp))
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DownloadsTab(
-    downloadedSongs: List<NavidromeCacheEntryEntity>,
-    onRemoveSong: (String) -> Unit,
-    cardShape: AbsoluteSmoothCornerShape
-) {
-    if (downloadedSongs.isEmpty()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(32.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    Icons.Rounded.CloudDownload,
-                    contentDescription = null,
-                    modifier = Modifier.size(64.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                )
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    text = "No downloaded songs yet",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontFamily = GoogleSansRounded,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "Songs auto-download after being played several times, or tap the download icon on any song.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = GoogleSansRounded,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
-            }
-        }
-    } else {
-        LazyColumn(
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "${downloadedSongs.size} downloaded song${if (downloadedSongs.size == 1) "" else "s"}",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontFamily = GoogleSansRounded,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    val totalMb = downloadedSongs.sumOf { it.sizeBytes } / (1024 * 1024)
-                    if (totalMb > 0) {
-                        Text(
-                            text = "${totalMb} MB",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = GoogleSansRounded,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
-            items(items = downloadedSongs, key = { it.navidromeId }) { entry ->
-                DownloadedSongCard(
-                    entry = entry,
-                    onRemoveClick = { onRemoveSong(entry.navidromeId) },
-                    cardShape = cardShape
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DownloadedSongCard(
-    entry: NavidromeCacheEntryEntity,
-    onRemoveClick: () -> Unit,
-    cardShape: AbsoluteSmoothCornerShape
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = cardShape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-    ) {
-        Row(
-            modifier = Modifier
-                .padding(12.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.secondaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                if (entry.coverArtId != null) {
-                    SmartImage(
-                        model = "navidrome_cover://${entry.coverArtId}",
-                        contentDescription = entry.title,
-                        contentScale = ContentScale.Crop,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Icon(
-                        Icons.Rounded.DownloadDone,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
-            }
-
-            Spacer(Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = entry.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontFamily = GoogleSansRounded,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = entry.artist,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = GoogleSansRounded,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (entry.sizeBytes > 0) {
-                    Text(
-                        text = "${entry.sizeBytes / (1024 * 1024)} MB · ${entry.playCount} plays",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = GoogleSansRounded,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                    )
-                }
-            }
-
-            FilledTonalIconButton(
-                onClick = onRemoveClick,
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer
-                )
-            ) {
-                Icon(
-                    Icons.Rounded.Delete,
-                    contentDescription = "Remove download",
-                    modifier = Modifier.size(20.dp)
-                )
             }
         }
     }
@@ -680,6 +490,95 @@ private fun SubsonicMenuCard(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(stringResource(R.string.cloud_dashboard_action_disconnect), fontFamily = GoogleSansRounded)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NavidromeCacheCard(
+    maxCacheSizeMb: Int,
+    cacheUsage: com.theveloper.pixelplay.data.navidrome.CacheUsage,
+    onSetMaxCacheSizeMb: (Int) -> Unit,
+    onClearStreamingCache: () -> Unit,
+    cardShape: AbsoluteSmoothCornerShape,
+) {
+    // Local slider state so dragging is smooth; the pref is committed on release.
+    var sliderValue by remember(maxCacheSizeMb) { mutableStateOf(maxCacheSizeMb.toFloat()) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = cardShape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.navidrome_cache_card_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontFamily = GoogleSansRounded,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = stringResource(R.string.navidrome_cache_usage_downloads, formatBytes(cacheUsage.downloadBytes)),
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = stringResource(R.string.navidrome_cache_usage_streaming, formatBytes(cacheUsage.streamingBytes)),
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.navidrome_cache_max_size_label),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded
+                )
+                Text(
+                    text = stringResource(R.string.navidrome_cache_max_size_value, sliderValue.toInt()),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Slider(
+                value = sliderValue,
+                onValueChange = { sliderValue = it },
+                onValueChangeFinished = { onSetMaxCacheSizeMb(sliderValue.toInt()) },
+                valueRange = 100f..5000f,
+                steps = 48, // ~100 MB increments
+            )
+            Text(
+                text = stringResource(R.string.navidrome_cache_size_hint),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            FilledTonalButton(
+                onClick = onClearStreamingCache,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            ) {
+                Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.navidrome_cache_clear_action), fontFamily = GoogleSansRounded)
             }
         }
     }

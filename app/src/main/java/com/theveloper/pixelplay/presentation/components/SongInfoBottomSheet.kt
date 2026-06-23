@@ -47,6 +47,8 @@ import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MusicNote
@@ -163,6 +165,11 @@ fun SongInfoBottomSheet(
     val watchTransfers by songInfoViewModel.watchTransfers.collectAsStateWithLifecycle()
     val watchSongIds by songInfoViewModel.watchSongIds.collectAsStateWithLifecycle()
     val reachableWatchNodeIds by songInfoViewModel.reachableWatchNodeIds.collectAsStateWithLifecycle()
+    val downloadedNavidromeIds by songInfoViewModel.downloadedNavidromeIds.collectAsStateWithLifecycle()
+    val downloadingNavidromeIds by songInfoViewModel.downloadingNavidromeIds.collectAsStateWithLifecycle()
+    val navidromeId = song.navidromeId
+    val isNavidromeDownloaded = navidromeId != null && downloadedNavidromeIds.contains(navidromeId)
+    val isNavidromeDownloading = navidromeId != null && downloadingNavidromeIds.contains(navidromeId)
     val latestSongWatchTransfer = remember(song.id, watchTransfers) {
         watchTransfers.values
             .asSequence()
@@ -545,6 +552,15 @@ fun SongInfoBottomSheet(
                                                 }
                                             }
                                         )
+
+                                        if (navidromeId != null) {
+                                            NavidromeDownloadActionButton(
+                                                isDownloaded = isNavidromeDownloaded,
+                                                isDownloading = isNavidromeDownloading,
+                                                onDownload = { songInfoViewModel.downloadNavidromeSong(navidromeId) },
+                                                onRemove = { songInfoViewModel.removeNavidromeDownload(navidromeId) },
+                                            )
+                                        }
 
                                         val shouldRenderWatchTransferRow =
                                             currentSongTransfer != null ||
@@ -1065,6 +1081,67 @@ private fun RingtoneActionButton(
                 contentDescription = stringResource(R.string.song_info_cd_set_sound_as),
             )
         }
+    }
+}
+
+@Composable
+private fun NavidromeDownloadActionButton(
+    isDownloaded: Boolean,
+    isDownloading: Boolean,
+    onDownload: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val containerColor = if (isDownloaded) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val contentColor = if (isDownloaded) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    FilledTonalButton(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 66.dp),
+        enabled = !isDownloading,
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+        ),
+        shape = CircleShape,
+        onClick = { if (isDownloaded) onRemove() else onDownload() },
+    ) {
+        when {
+            isDownloading -> CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 2.dp,
+                color = contentColor,
+            )
+            isDownloaded -> Icon(
+                modifier = Modifier.size(24.dp),
+                imageVector = Icons.Rounded.CloudDone,
+                contentDescription = null,
+            )
+            else -> Icon(
+                modifier = Modifier.size(24.dp),
+                imageVector = Icons.Rounded.CloudDownload,
+                contentDescription = null,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = stringResource(
+                when {
+                    isDownloading -> R.string.navidrome_download_in_progress
+                    isDownloaded -> R.string.navidrome_download_remove
+                    else -> R.string.navidrome_download_action
+                }
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

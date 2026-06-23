@@ -215,12 +215,22 @@ class PlayerViewModel @Inject constructor(
     val playlistSelectionStateHolder: PlaylistSelectionStateHolder,
     private val playbackDispatchStateHolder: PlaybackDispatchStateHolder,
     private val mediaControllerSyncStateHolder: MediaControllerSyncStateHolder,
+    private val navidromeDownloadStateHolder: NavidromeDownloadStateHolder,
     private val sessionToken: SessionToken,
     private val mediaControllerFactory: com.theveloper.pixelplay.data.media.MediaControllerFactory
 ) : ViewModel() {
 
     private val _playerUiState = MutableStateFlow(PlayerUiState())
     val playerUiState: StateFlow<PlayerUiState> = _playerUiState.asStateFlow()
+
+    /** IDs of Navidrome songs with a completed pinned download (reactive). */
+    val downloadedNavidromeIds: StateFlow<Set<String>> = navidromeDownloadStateHolder.downloadedIds
+    /** IDs of Navidrome songs whose download is currently in flight. */
+    val downloadingNavidromeIds: StateFlow<Set<String>> = navidromeDownloadStateHolder.downloadingIds
+
+    fun downloadNavidromeSong(navidromeId: String) = navidromeDownloadStateHolder.download(navidromeId)
+    fun removeNavidromeDownload(navidromeId: String) = navidromeDownloadStateHolder.remove(navidromeId)
+    fun downloadNavidromeSongs(navidromeIds: Collection<String>) = navidromeDownloadStateHolder.downloadAll(navidromeIds)
 
     // Dedicated queue flow so the player sheet's MiniPlayer branch does not
     // recompose whenever the queue changes. Consumers that actually need the

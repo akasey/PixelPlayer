@@ -13,6 +13,7 @@ import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.database.StandaloneDatabaseProvider
 import com.theveloper.pixelplay.data.database.NavidromeCacheEntryDao
@@ -48,14 +49,40 @@ class NavidromeCacheManager @Inject constructor(
 ) {
     private companion object {
         private const val TAG = "NavidromeCacheManager"
-        private const val CACHE_DIR = "navidrome_audio_cache"
+        // Transient as-you-play streaming cache (LRU-evicted, governed by the size pref).
+        private const val STREAMING_CACHE_DIR = "navidrome_audio_cache"
+        // Pinned offline downloads (never evicted — explicit + auto downloads land here).
+        private const val DOWNLOAD_CACHE_DIR = "navidrome_downloads"
         private const val DEFAULT_MAX_SIZE_BYTES = 500L * 1024 * 1024 // 500 MB
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // Lazily initialized so max-cache-size pref is read before first use.
-    private val simpleCache: SimpleCache by lazy {
+    init {
+        // Correct any stale "downloaded" rows off the main thread at startup.
+        scope.launch { reconcileDownloads() }
+    }
+
+    // Both caches share one database provider; SimpleCache requires distinct directories.
+    private val databaseProvider by lazy { StandaloneDatabaseProvider(context) }
+
+    /**
+     * Pinned download cache. Uses [NoOpCacheEvictor] so explicitly (or auto-) downloaded songs
+     * are never evicted — they remain available offline regardless of the streaming cache budget.
+     */
+    private val downloadCache: SimpleCache by lazy {
+        SimpleCache(
+            File(context.filesDir, DOWNLOAD_CACHE_DIR),
+            NoOpCacheEvictor(),
+            databaseProvider
+        )
+    }
+
+    /**
+     * Transient streaming cache populated as songs play. LRU-evicted under the user-configured
+     * size budget. Read on the size pref at first use; a size change takes effect on next launch.
+     */
+    private val streamingCache: SimpleCache by lazy {
         val maxSizeBytes = runCatching {
             kotlinx.coroutines.runBlocking {
                 userPreferencesRepository.navidromeMaxCacheSizeMbFlow.first() * 1024L * 1024L
@@ -63,9 +90,9 @@ class NavidromeCacheManager @Inject constructor(
         }.getOrDefault(DEFAULT_MAX_SIZE_BYTES)
 
         SimpleCache(
-            File(context.filesDir, CACHE_DIR),
+            File(context.filesDir, STREAMING_CACHE_DIR),
             LeastRecentlyUsedCacheEvictor(maxSizeBytes),
-            StandaloneDatabaseProvider(context)
+            databaseProvider
         )
     }
 
@@ -80,24 +107,64 @@ class NavidromeCacheManager @Inject constructor(
     }
 
     /**
-     * Wraps [upstreamFactory] with a [CacheDataSource.Factory] that reads/writes
-     * audio for `navidrome://` URIs from/to [SimpleCache].
+     * Wraps [upstreamFactory] with a two-tier cache for `navidrome://` URIs:
+     *   pinned downloads (read-only) → streaming LRU cache (read/write) → [upstreamFactory] (network).
      *
-     * Called by DualPlayerEngine.buildPlayer() so both ExoPlayer instances share the same cache.
+     * Playback reads a pinned download if present, otherwise reads/writes the streaming cache, then
+     * falls back to the network. Playback never writes into the pinned store — only explicit
+     * downloads do (via [downloadSong]) — so the streaming budget can never evict a download.
+     *
+     * Called by DualPlayerEngine.buildPlayer() so both ExoPlayer instances share the same caches.
      */
     fun buildCacheDataSourceFactory(upstreamFactory: DataSource.Factory): CacheDataSource.Factory {
-        return CacheDataSource.Factory()
-            .setCache(simpleCache)
+        // Tier 2: streaming LRU cache (read + write), upstream = network.
+        val streamingFactory = CacheDataSource.Factory()
+            .setCache(streamingCache)
             .setUpstreamDataSourceFactory(upstreamFactory)
             .setCacheKeyFactory(cacheKeyFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+        // Tier 1: pinned downloads (read-only), upstream = streaming tier.
+        return CacheDataSource.Factory()
+            .setCache(downloadCache)
+            .setUpstreamDataSourceFactory(streamingFactory)
+            .setCacheKeyFactory(cacheKeyFactory)
+            .setCacheWriteDataSinkFactory(null) // read-only: never write pinned bytes during playback
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 
-    /** True if the full audio for [navidromeId] is present in the local cache. */
+    /** True if the full audio for [navidromeId] is present as a pinned download. */
     fun isCached(navidromeId: String): Boolean {
         val key = "navidrome://$navidromeId"
-        val contentLength = ContentMetadata.getContentLength(simpleCache.getContentMetadata(key))
+        val contentLength = ContentMetadata.getContentLength(downloadCache.getContentMetadata(key))
         return contentLength > 0
+    }
+
+    /** Bytes currently held by pinned downloads and the transient streaming cache. */
+    fun cacheUsageBytes(): CacheUsage =
+        CacheUsage(downloadBytes = downloadCache.cacheSpace, streamingBytes = streamingCache.cacheSpace)
+
+    /** Evicts the entire transient streaming cache (does not touch pinned downloads). */
+    suspend fun clearStreamingCache() = withContext(Dispatchers.IO) {
+        runCatching {
+            streamingCache.keys.toList().forEach { streamingCache.removeResource(it) }
+        }.onFailure { Timber.tag(TAG).e(it, "clearStreamingCache: failed") }
+    }
+
+    /**
+     * Reconciles Room with the pinned cache: any row flagged downloaded whose audio is missing
+     * from the pinned store is corrected to not-downloaded, so the Downloads list never lies
+     * (e.g. after a manual file deletion or cache corruption).
+     */
+    suspend fun reconcileDownloads() = withContext(Dispatchers.IO) {
+        runCatching {
+            cacheEntryDao.getDownloadedList().forEach { entry ->
+                if (!isCached(entry.navidromeId)) {
+                    Timber.tag(TAG).w("reconcileDownloads: %s flagged downloaded but missing — correcting", entry.navidromeId)
+                    cacheEntryDao.markAsNotDownloaded(entry.navidromeId)
+                }
+            }
+        }.onFailure { Timber.tag(TAG).e(it, "reconcileDownloads: failed") }
     }
 
     /** Emits the list of songs the user has explicitly (or auto-) downloaded. */
@@ -134,11 +201,12 @@ class NavidromeCacheManager @Inject constructor(
         // Use the Navidrome OkHttp client so downloads honor the WireGuard tunnel when enabled.
         val httpDataSource = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(navidromeOkHttpClient)
             .createDataSource()
+        // Write into the pinned download cache so the song is never LRU-evicted.
         val cacheDataSource = CacheDataSource(
-            simpleCache,
+            downloadCache,
             httpDataSource,
             FileDataSource(),
-            CacheDataSink(simpleCache, CacheDataSink.DEFAULT_FRAGMENT_SIZE),
+            CacheDataSink(downloadCache, CacheDataSink.DEFAULT_FRAGMENT_SIZE),
             CacheDataSource.FLAG_BLOCK_ON_CACHE or CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR,
             null
         )
@@ -149,7 +217,7 @@ class NavidromeCacheManager @Inject constructor(
             cacheWriter.cache()
 
             val sizeBytes = ContentMetadata.getContentLength(
-                simpleCache.getContentMetadata(cacheKey)
+                downloadCache.getContentMetadata(cacheKey)
             ).coerceAtLeast(0)
 
             // Ensure entry exists in Room (may already be there if song was played before)
@@ -185,9 +253,9 @@ class NavidromeCacheManager @Inject constructor(
     suspend fun removeSong(navidromeId: String) = withContext(Dispatchers.IO) {
         val cacheKey = "navidrome://$navidromeId"
         try {
-            simpleCache.removeResource(cacheKey)
+            downloadCache.removeResource(cacheKey)
         } catch (e: Exception) {
-            Timber.tag(TAG).e(e, "removeSong: failed to remove from SimpleCache for %s", navidromeId)
+            Timber.tag(TAG).e(e, "removeSong: failed to remove from download cache for %s", navidromeId)
         }
         cacheEntryDao.markAsNotDownloaded(navidromeId)
         Timber.tag(TAG).d("removeSong: removed %s", navidromeId)
@@ -228,10 +296,15 @@ class NavidromeCacheManager @Inject constructor(
     }
 
     fun release() {
-        try {
-            simpleCache.release()
-        } catch (e: Exception) {
-            Timber.tag(TAG).e(e, "release: error releasing SimpleCache")
-        }
+        runCatching { streamingCache.release() }
+            .onFailure { Timber.tag(TAG).e(it, "release: error releasing streaming cache") }
+        runCatching { downloadCache.release() }
+            .onFailure { Timber.tag(TAG).e(it, "release: error releasing download cache") }
     }
 }
+
+/** Bytes held by each Navidrome cache tier. */
+data class CacheUsage(
+    val downloadBytes: Long,
+    val streamingBytes: Long,
+)

@@ -163,6 +163,21 @@
     <string name="auth_subsonic_navidrome_title">Subsonic / Navidrome</string>
     <string name="auth_subsonic_title">Subsonic</string>
 
+    <!-- Navidrome downloads / offline cache -->
+    <string name="navidrome_download_action">Download</string>
+    <string name="navidrome_download_remove">Remove download</string>
+    <string name="navidrome_download_in_progress">Downloading…</string>
+    <string name="navidrome_download_all">Download all</string>
+    <string name="navidrome_cache_card_title">Offline cache</string>
+    <string name="navidrome_cache_max_size_label">Max streaming cache size</string>
+    <string name="navidrome_cache_max_size_value">%1$d MB</string>
+    <string name="navidrome_cache_size_hint">Applies on next app start. Downloads are kept separately and never count toward this limit.</string>
+    <string name="navidrome_cache_usage_downloads">Downloads: %1$s</string>
+    <string name="navidrome_cache_usage_streaming">Streaming cache: %1$s</string>
+    <string name="navidrome_cache_clear_action">Clear streaming cache</string>
+    <string name="navidrome_downloads_empty_title">No downloads yet</string>
+    <string name="navidrome_downloads_empty_hint">Download songs from the song menu or player to keep them available offline.</string>
+
     <!-- Jellyfin Auth -->
     <string name="auth_jellyfin_connect_subtitle">Enter your Jellyfin server URL and account credentials.</string>
     <string name="auth_jellyfin_footer_msg">Connects to Jellyfin servers for streaming your music library</string>
