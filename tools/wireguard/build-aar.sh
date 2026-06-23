@@ -25,10 +25,13 @@ go mod tidy
 
 echo ">> Building AAR with gomobile (arm64-v8a, armeabi-v7a)"
 mkdir -p "$OUT_DIR"
+# -extldflags max-page-size=16384 makes libgojni.so LOAD segments 16 KB-aligned, required for
+# Android 15+ (16 KB page) devices. Without it the arm64 .so fails 16 KB compatibility checks.
 gomobile bind \
   -target=android/arm64,android/arm \
   -androidapi 30 \
   -javapkg=com.theveloper.pixelplay \
+  -ldflags "-extldflags=-Wl,-z,max-page-size=16384" \
   -o "$OUT_AAR" \
   .
 

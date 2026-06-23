@@ -63,8 +63,15 @@ func StartProxy(uapiConfig string, localAddrsCsv string, dnsCsv string, mtu int,
 		return 0, fmt.Errorf("create netstack tun: %w", err)
 	}
 
+	// wireguard-go's IpcSet requires endpoints as literal IP:port; it does not resolve DNS.
+	// Resolve the peer endpoint on the real (underlay) network before configuring the device.
+	resolvedConfig, err := resolveEndpoints(uapiConfig)
+	if err != nil {
+		return 0, fmt.Errorf("resolve endpoint: %w", err)
+	}
+
 	d := device.NewDevice(tun, conn.NewDefaultBind(), device.NewLogger(device.LogLevelError, "wg "))
-	if err := d.IpcSet(uapiConfig); err != nil {
+	if err := d.IpcSet(resolvedConfig); err != nil {
 		d.Close()
 		return 0, fmt.Errorf("ipc set: %w", err)
 	}
@@ -105,6 +112,30 @@ func stopLocked() {
 		dev = nil
 	}
 	tnet = nil
+}
+
+// resolveEndpoints rewrites every "endpoint=host:port" line in a UAPI config so the host is a
+// literal IP address, resolving DNS via the device's real network. IP endpoints pass through
+// unchanged.
+func resolveEndpoints(uapi string) (string, error) {
+	lines := strings.Split(uapi, "\n")
+	for i, line := range lines {
+		const prefix = "endpoint="
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		hostPort := strings.TrimSpace(line[len(prefix):])
+		// Already a literal IP:port? Leave it.
+		if _, err := netip.ParseAddrPort(hostPort); err == nil {
+			continue
+		}
+		addr, err := net.ResolveUDPAddr("udp", hostPort)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", hostPort, err)
+		}
+		lines[i] = prefix + addr.String()
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 func parseAddrs(csv string) ([]netip.Addr, error) {
