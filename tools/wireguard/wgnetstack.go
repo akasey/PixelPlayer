@@ -102,6 +102,31 @@ func StopProxy() {
 	stopLocked()
 }
 
+// Stats returns a newline-separated, secret-free subset of the wireguard-go UAPI state:
+// last_handshake_time_sec, rx_bytes, tx_bytes. Empty string when the tunnel is down.
+func Stats() string {
+	mu.Lock()
+	d := dev
+	mu.Unlock()
+	if d == nil {
+		return ""
+	}
+	raw, err := d.IpcGet()
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.HasPrefix(line, "rx_bytes=") ||
+			strings.HasPrefix(line, "tx_bytes=") ||
+			strings.HasPrefix(line, "last_handshake_time_sec=") {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
 func stopLocked() {
 	if listener != nil {
 		listener.Close()

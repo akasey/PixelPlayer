@@ -32,4 +32,6 @@ class NoOpWireGuardTunnel @Inject constructor() : WireGuardTunnel {
     }
 
     override fun socksProxy(): Proxy? = null
+
+    override fun stats(): WireGuardStats? = null
 }

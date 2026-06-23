@@ -5,17 +5,34 @@ import androidx.lifecycle.viewModelScope
 import com.theveloper.pixelplay.data.navidrome.tunnel.TunnelState
 import com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardConfigParser
 import com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardConfigStore
+import com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardStats
 import com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardTunnelManager
 import com.theveloper.pixelplay.data.network.navidrome.NavidromeApiService
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/**
+ * Live tunnel statistics for the UI: cumulative totals plus per-second rates derived by sampling.
+ *
+ * @param downBytesPerSec Download rate (rx delta over the sample interval).
+ * @param upBytesPerSec Upload rate (tx delta over the sample interval).
+ */
+data class TunnelStatsUi(
+    val lastHandshakeEpochSec: Long,
+    val rxBytes: Long,
+    val txBytes: Long,
+    val downBytesPerSec: Long,
+    val upBytesPerSec: Long,
+)
 
 /** Transient result of a "Test tunnel" run, shown to the user. */
 sealed interface TunnelTestResult {
@@ -53,6 +70,37 @@ class NavidromeTunnelViewModel @Inject constructor(
 
     private val _testResult = MutableStateFlow<TunnelTestResult>(TunnelTestResult.Idle)
     val testResult: StateFlow<TunnelTestResult> = _testResult.asStateFlow()
+
+    /**
+     * Live tunnel stats, polled once a second while observed. Speeds are computed from the byte
+     * deltas between consecutive samples. Null while the tunnel is down.
+     */
+    val stats: StateFlow<TunnelStatsUi?> = flow {
+        var prev: WireGuardStats? = null
+        var prevAt = 0L
+        while (true) {
+            val cur = tunnelManager.stats()
+            if (cur == null) {
+                prev = null
+                prevAt = 0L
+                emit(null)
+            } else {
+                val now = System.currentTimeMillis()
+                val last = prev
+                if (last != null && prevAt > 0L) {
+                    val dtMs = (now - prevAt).coerceAtLeast(1L)
+                    val down = ((cur.rxBytes - last.rxBytes) * 1000L / dtMs).coerceAtLeast(0L)
+                    val up = ((cur.txBytes - last.txBytes) * 1000L / dtMs).coerceAtLeast(0L)
+                    emit(TunnelStatsUi(cur.lastHandshakeEpochSec, cur.rxBytes, cur.txBytes, down, up))
+                } else {
+                    emit(TunnelStatsUi(cur.lastHandshakeEpochSec, cur.rxBytes, cur.txBytes, 0L, 0L))
+                }
+                prev = cur
+                prevAt = now
+            }
+            delay(1_000L)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun hasConfig(): Boolean = configStore.hasConfig()
 

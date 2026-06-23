@@ -696,6 +696,7 @@ private fun NavidromeTunnelCard(
     val tunnelState by viewModel.tunnelState.collectAsStateWithLifecycle()
     val importError by viewModel.importError.collectAsStateWithLifecycle()
     val testResult by viewModel.testResult.collectAsStateWithLifecycle()
+    val stats by viewModel.stats.collectAsStateWithLifecycle()
 
     val pickConf = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -795,6 +796,10 @@ private fun NavidromeTunnelCard(
                 fontFamily = GoogleSansRounded
             )
 
+            if (tunnelState is TunnelState.Up) {
+                stats?.let { TunnelStatsBlock(it) }
+            }
+
             importError?.let {
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -849,6 +854,74 @@ private fun TunnelTestLine(text: String, color: Color) {
     Spacer(Modifier.height(4.dp))
     Text(text = text, style = MaterialTheme.typography.bodySmall, color = color, fontFamily = GoogleSansRounded)
 }
+
+@Composable
+private fun TunnelStatsBlock(stats: TunnelStatsUi) {
+    Spacer(Modifier.height(10.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .padding(12.dp)
+    ) {
+        TunnelStatRow("Last handshake", handshakeAgo(stats.lastHandshakeEpochSec))
+        Spacer(Modifier.height(6.dp))
+        TunnelStatRow(
+            "Download",
+            "${formatRate(stats.downBytesPerSec)}  ·  ${formatBytes(stats.rxBytes)} total"
+        )
+        Spacer(Modifier.height(6.dp))
+        TunnelStatRow(
+            "Upload",
+            "${formatRate(stats.upBytesPerSec)}  ·  ${formatBytes(stats.txBytes)} total"
+        )
+    }
+}
+
+@Composable
+private fun TunnelStatRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = GoogleSansRounded
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = GoogleSansRounded,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+private fun handshakeAgo(epochSec: Long): String {
+    if (epochSec <= 0L) return "never"
+    val secs = (System.currentTimeMillis() / 1000L - epochSec).coerceAtLeast(0L)
+    return when {
+        secs < 5L -> "just now"
+        secs < 60L -> "${secs}s ago"
+        secs < 3600L -> "${secs / 60L}m ${secs % 60L}s ago"
+        else -> "${secs / 3600L}h ${(secs % 3600L) / 60L}m ago"
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024L) return "$bytes B"
+    val units = arrayOf("KB", "MB", "GB", "TB")
+    var value = bytes.toDouble() / 1024.0
+    var unit = 0
+    while (value >= 1024.0 && unit < units.size - 1) {
+        value /= 1024.0
+        unit++
+    }
+    return "%.1f %s".format(value, units[unit])
+}
+
+private fun formatRate(bytesPerSec: Long): String = "${formatBytes(bytesPerSec)}/s"
 
 @Composable
 private fun SongCard(

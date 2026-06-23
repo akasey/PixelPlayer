@@ -118,6 +118,27 @@ class WireGuardConfigParserTest {
     }
 
     @Test
+    fun `parses stats from uapi subset`() {
+        val raw = """
+            last_handshake_time_sec=1700000000
+            rx_bytes=204800
+            tx_bytes=51200
+        """.trimIndent()
+        val stats = WireGuardStats.parse(raw)
+        assertThat(stats.lastHandshakeEpochSec).isEqualTo(1700000000L)
+        assertThat(stats.rxBytes).isEqualTo(204800L)
+        assertThat(stats.txBytes).isEqualTo(51200L)
+    }
+
+    @Test
+    fun `stats default to zero when absent`() {
+        val stats = WireGuardStats.parse("")
+        assertThat(stats.lastHandshakeEpochSec).isEqualTo(0L)
+        assertThat(stats.rxBytes).isEqualTo(0L)
+        assertThat(stats.txBytes).isEqualTo(0L)
+    }
+
+    @Test
     fun `throws when key is not 32 bytes`() {
         val conf = """
             [Interface]

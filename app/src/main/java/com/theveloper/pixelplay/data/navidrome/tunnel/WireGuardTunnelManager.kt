@@ -51,6 +51,9 @@ class WireGuardTunnelManager @Inject constructor(
     /** The live SOCKS5 proxy when the tunnel is up, else null (caller goes direct). */
     fun socksProxy(): Proxy? = tunnel.socksProxy()
 
+    /** Current transport counters, or null when the tunnel is not up. */
+    fun stats(): WireGuardStats? = tunnel.stats()
+
     /**
      * Ensure the tunnel is up before a Navidrome request, when enabled.
      *

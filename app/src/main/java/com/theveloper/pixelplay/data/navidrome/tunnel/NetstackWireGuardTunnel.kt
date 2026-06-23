@@ -90,4 +90,16 @@ class NetstackWireGuardTunnel @Inject constructor() : WireGuardTunnel {
             Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", s.socksPort))
         } else null
     }
+
+    override fun stats(): WireGuardStats? {
+        val cls = bridge ?: return null
+        if (_state.value !is TunnelState.Up) return null
+        return try {
+            val raw = cls.getMethod("stats").invoke(null) as? String
+            if (raw.isNullOrBlank()) null else WireGuardStats.parse(raw)
+        } catch (e: Throwable) {
+            Timber.w(e, "Failed to read WireGuard stats")
+            null
+        }
+    }
 }
