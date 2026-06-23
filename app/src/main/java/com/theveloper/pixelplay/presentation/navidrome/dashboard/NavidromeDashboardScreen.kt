@@ -16,9 +16,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudQueue
 import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.*
@@ -34,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.theveloper.pixelplay.R
+import com.theveloper.pixelplay.data.database.NavidromeCacheEntryEntity
 import com.theveloper.pixelplay.data.database.NavidromePlaylistEntity
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.components.SmartImage
@@ -53,6 +57,9 @@ fun NavidromeDashboardScreen(
     val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle()
     val syncProgress by viewModel.syncProgress.collectAsStateWithLifecycle()
     val syncMessage by viewModel.syncMessage.collectAsStateWithLifecycle()
+    val selectedPlaylistSongs by viewModel.selectedPlaylistSongs.collectAsStateWithLifecycle()
+    val downloadedSongs by viewModel.downloadedSongs.collectAsStateWithLifecycle()
+    val downloadingIds by viewModel.downloadingIds.collectAsStateWithLifecycle()
 
     val cardShape = AbsoluteSmoothCornerShape(
         cornerRadiusTR = 20.dp, cornerRadiusTL = 20.dp,
@@ -99,10 +106,16 @@ fun NavidromeDashboardScreen(
             syncMessage = syncMessage,
             username = viewModel.username,
             lastSyncTime = viewModel.lastSyncTime,
+            selectedPlaylistSongs = selectedPlaylistSongs,
+            downloadedSongs = downloadedSongs,
+            downloadingIds = downloadingIds,
             onSyncAll = { viewModel.syncAllPlaylistsAndSongs() },
             onSyncPlaylist = { viewModel.syncPlaylistSongs(it) },
             onDeletePlaylist = { viewModel.deletePlaylist(it) },
             onLoadPlaylistSongs = { viewModel.loadPlaylistSongs(it) },
+            onDownloadSong = { viewModel.downloadSong(it) },
+            onRemoveSong = { viewModel.removeSong(it) },
+            isCached = { viewModel.isCached(it) },
             onLogout = {
                 viewModel.logout()
                 onBack()
@@ -121,14 +134,23 @@ private fun DashboardContent(
     syncMessage: String?,
     username: String?,
     lastSyncTime: Long,
+    selectedPlaylistSongs: List<Song>,
+    downloadedSongs: List<NavidromeCacheEntryEntity>,
+    downloadingIds: Set<String>,
     onSyncAll: () -> Unit,
     onSyncPlaylist: (String) -> Unit,
     onDeletePlaylist: (String) -> Unit,
     onLoadPlaylistSongs: (String) -> Unit,
+    onDownloadSong: (String) -> Unit,
+    onRemoveSong: (String) -> Unit,
+    isCached: (String) -> Boolean,
     onLogout: () -> Unit,
     cardShape: AbsoluteSmoothCornerShape,
     paddingValues: PaddingValues
 ) {
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var expandedPlaylistId by remember { mutableStateOf<String?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -137,9 +159,7 @@ private fun DashboardContent(
         // Sync status banner
         AnimatedVisibility(
             visible = syncMessage != null,
-            enter = slideInVertically(
-                animationSpec = spring(stiffness = Spring.StiffnessMedium)
-            ) + fadeIn(),
+            enter = slideInVertically(animationSpec = spring(stiffness = Spring.StiffnessMedium)) + fadeIn(),
             exit = fadeOut()
         ) {
             syncMessage?.let { message ->
@@ -156,9 +176,7 @@ private fun DashboardContent(
                     )
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             if (isSyncing && syncProgress == null) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(20.dp),
@@ -183,7 +201,6 @@ private fun DashboardContent(
                                 )
                             }
                         }
-                        
                         if (isSyncing && syncProgress != null) {
                             Spacer(Modifier.height(12.dp))
                             LinearProgressIndicator(
@@ -208,9 +225,7 @@ private fun DashboardContent(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 shape = cardShape,
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                )
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
@@ -231,9 +246,7 @@ private fun DashboardContent(
                         )
                     }
                     Spacer(Modifier.width(16.dp))
-                    Column(
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = name,
                             style = MaterialTheme.typography.titleMedium,
@@ -257,93 +270,335 @@ private fun DashboardContent(
             }
         }
 
-        SubsonicMenuCard(
-            isSyncing = isSyncing,
-            onSyncAll = onSyncAll,
-            onLogout = onLogout,
-            cardShape = cardShape
-        )
+        SubsonicMenuCard(isSyncing = isSyncing, onSyncAll = onSyncAll, onLogout = onLogout, cardShape = cardShape)
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
-        // Playlists header
-        Row(
+        // Tab row: Playlists | Downloads
+        TabRow(
+            selectedTabIndex = selectedTab,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = MaterialTheme.colorScheme.primary
+        ) {
+            Tab(
+                selected = selectedTab == 0,
+                onClick = { selectedTab = 0 },
+                text = {
+                    Text(
+                        stringResource(R.string.cloud_dashboard_title_playlists),
+                        fontFamily = GoogleSansRounded,
+                        fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            )
+            Tab(
+                selected = selectedTab == 1,
+                onClick = { selectedTab = 1 },
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Downloads",
+                            fontFamily = GoogleSansRounded,
+                            fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal
+                        )
+                        if (downloadedSongs.isNotEmpty()) {
+                            Spacer(Modifier.width(6.dp))
+                            Badge { Text("${downloadedSongs.size}") }
+                        }
+                    }
+                }
+            )
+        }
+
+        when (selectedTab) {
+            0 -> PlaylistsTab(
+                playlists = playlists,
+                isSyncing = isSyncing,
+                selectedPlaylistSongs = selectedPlaylistSongs,
+                expandedPlaylistId = expandedPlaylistId,
+                downloadingIds = downloadingIds,
+                onPlaylistClick = { playlistId ->
+                    expandedPlaylistId = if (expandedPlaylistId == playlistId) null else playlistId
+                    if (expandedPlaylistId != null) onLoadPlaylistSongs(playlistId)
+                },
+                onSyncPlaylist = onSyncPlaylist,
+                onDeletePlaylist = onDeletePlaylist,
+                onDownloadSong = onDownloadSong,
+                isCached = isCached,
+                onSyncAll = onSyncAll,
+                cardShape = cardShape
+            )
+            1 -> DownloadsTab(
+                downloadedSongs = downloadedSongs,
+                onRemoveSong = onRemoveSong,
+                cardShape = cardShape
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlaylistsTab(
+    playlists: List<NavidromePlaylistEntity>,
+    isSyncing: Boolean,
+    selectedPlaylistSongs: List<Song>,
+    expandedPlaylistId: String?,
+    downloadingIds: Set<String>,
+    onPlaylistClick: (String) -> Unit,
+    onSyncPlaylist: (String) -> Unit,
+    onDeletePlaylist: (String) -> Unit,
+    onDownloadSong: (String) -> Unit,
+    isCached: (String) -> Boolean,
+    onSyncAll: () -> Unit,
+    cardShape: AbsoluteSmoothCornerShape
+) {
+    if (playlists.isEmpty() && !isSyncing) {
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(32.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = stringResource(R.string.cloud_dashboard_title_playlists),
-                style = MaterialTheme.typography.titleMedium,
-                fontFamily = GoogleSansRounded,
-                fontWeight = FontWeight.Bold
-            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Rounded.CloudQueue,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = stringResource(R.string.cloud_dashboard_playlists_empty_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontFamily = GoogleSansRounded,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.cloud_dashboard_playlists_empty_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            }
+        }
+    } else {
+        LazyColumn(
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             if (playlists.isEmpty()) {
-                TextButton(onClick = onSyncAll) {
-                    Icon(
-                        Icons.Rounded.Sync,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.cloud_dashboard_action_sync), fontFamily = GoogleSansRounded, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = stringResource(R.string.cloud_dashboard_title_playlists),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontFamily = GoogleSansRounded,
+                            fontWeight = FontWeight.Bold
+                        )
+                        TextButton(onClick = onSyncAll) {
+                            Icon(Icons.Rounded.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(stringResource(R.string.cloud_dashboard_action_sync), fontFamily = GoogleSansRounded)
+                        }
+                    }
+                }
+            }
+            items(items = playlists, key = { it.id }) { playlist ->
+                PlaylistCard(
+                    playlist = playlist,
+                    onSyncClick = { onSyncPlaylist(playlist.id) },
+                    onDeleteClick = { onDeletePlaylist(playlist.id) },
+                    onClick = { onPlaylistClick(playlist.id) },
+                    cardShape = cardShape,
+                    isSyncing = isSyncing,
+                    isExpanded = expandedPlaylistId == playlist.id
+                )
+                if (expandedPlaylistId == playlist.id && selectedPlaylistSongs.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    selectedPlaylistSongs.forEach { song ->
+                        val navidromeId = song.contentUriString.removePrefix("navidrome://")
+                        SongCard(
+                            song = song,
+                            isDownloading = downloadingIds.contains(navidromeId),
+                            isCached = isCached(navidromeId),
+                            onDownloadClick = { onDownloadSong(navidromeId) },
+                            cardShape = cardShape
+                        )
+                        Spacer(Modifier.height(4.dp))
+                    }
                 }
             }
         }
+    }
+}
 
-        // Playlist list
-        if (playlists.isEmpty() && !isSyncing) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
+@Composable
+private fun DownloadsTab(
+    downloadedSongs: List<NavidromeCacheEntryEntity>,
+    onRemoveSong: (String) -> Unit,
+    cardShape: AbsoluteSmoothCornerShape
+) {
+    if (downloadedSongs.isEmpty()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Rounded.CloudDownload,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = "No downloaded songs yet",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontFamily = GoogleSansRounded,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Songs auto-download after being played several times, or tap the download icon on any song.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            }
+        }
+    } else {
+        LazyColumn(
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.Rounded.CloudQueue,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                    )
-                    Spacer(Modifier.height(16.dp))
                     Text(
-                        text = stringResource(R.string.cloud_dashboard_playlists_empty_title),
-                        style = MaterialTheme.typography.bodyLarge,
+                        text = "${downloadedSongs.size} downloaded song${if (downloadedSongs.size == 1) "" else "s"}",
+                        style = MaterialTheme.typography.titleSmall,
                         fontFamily = GoogleSansRounded,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.cloud_dashboard_playlists_empty_hint),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = GoogleSansRounded,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    val totalMb = downloadedSongs.sumOf { it.sizeBytes } / (1024 * 1024)
+                    if (totalMb > 0) {
+                        Text(
+                            text = "${totalMb} MB",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = GoogleSansRounded,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+            items(items = downloadedSongs, key = { it.navidromeId }) { entry ->
+                DownloadedSongCard(
+                    entry = entry,
+                    onRemoveClick = { onRemoveSong(entry.navidromeId) },
+                    cardShape = cardShape
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadedSongCard(
+    entry: NavidromeCacheEntryEntity,
+    onRemoveClick: () -> Unit,
+    cardShape: AbsoluteSmoothCornerShape
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = cardShape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(12.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.secondaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                if (entry.coverArtId != null) {
+                    SmartImage(
+                        model = "navidrome_cover://${entry.coverArtId}",
+                        contentDescription = entry.title,
+                        contentScale = ContentScale.Crop,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        Icons.Rounded.DownloadDone,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                 }
             }
-        } else {
-            LazyColumn(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(
-                    items = playlists,
-                    key = { it.id }
-                ) { playlist ->
-                    PlaylistCard(
-                        playlist = playlist,
-                        onSyncClick = { onSyncPlaylist(playlist.id) },
-                        onDeleteClick = { onDeletePlaylist(playlist.id) },
-                        onClick = { onLoadPlaylistSongs(playlist.id) },
-                        cardShape = cardShape,
-                        isSyncing = isSyncing
+
+            Spacer(Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = entry.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = entry.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = GoogleSansRounded,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (entry.sizeBytes > 0) {
+                    Text(
+                        text = "${entry.sizeBytes / (1024 * 1024)} MB · ${entry.playCount} plays",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = GoogleSansRounded,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                     )
                 }
+            }
+
+            FilledTonalIconButton(
+                onClick = onRemoveClick,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                )
+            ) {
+                Icon(
+                    Icons.Rounded.Delete,
+                    contentDescription = "Remove download",
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
@@ -361,13 +616,9 @@ private fun SubsonicMenuCard(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         shape = cardShape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        )
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = stringResource(R.string.cloud_dashboard_quick_actions),
                 style = MaterialTheme.typography.titleMedium,
@@ -404,16 +655,11 @@ private fun SubsonicMenuCard(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(stringResource(R.string.cloud_sync_status_syncing), fontFamily = GoogleSansRounded)
                     } else {
-                        Icon(
-                            Icons.Rounded.CloudSync,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Icon(Icons.Rounded.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(stringResource(R.string.cloud_dashboard_action_sync_library), fontFamily = GoogleSansRounded)
                     }
                 }
-
                 FilledTonalButton(
                     onClick = onLogout,
                     modifier = Modifier.weight(1f),
@@ -422,11 +668,7 @@ private fun SubsonicMenuCard(
                         contentColor = MaterialTheme.colorScheme.onErrorContainer
                     )
                 ) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.Logout,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(stringResource(R.string.cloud_dashboard_action_disconnect), fontFamily = GoogleSansRounded)
                 }
@@ -438,14 +680,15 @@ private fun SubsonicMenuCard(
 @Composable
 private fun SongCard(
     song: Song,
+    isDownloading: Boolean,
+    isCached: Boolean,
+    onDownloadClick: () -> Unit,
     cardShape: AbsoluteSmoothCornerShape
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = cardShape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        )
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
     ) {
         Row(
             modifier = Modifier
@@ -453,7 +696,6 @@ private fun SongCard(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Album art
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -499,6 +741,30 @@ private fun SongCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            when {
+                isCached -> Icon(
+                    Icons.Rounded.CloudDone,
+                    contentDescription = "Downloaded",
+                    modifier = Modifier
+                        .size(40.dp)
+                        .padding(8.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                isDownloading -> CircularProgressIndicator(
+                    modifier = Modifier.size(40.dp).padding(8.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                else -> IconButton(onClick = onDownloadClick) {
+                    Icon(
+                        Icons.Rounded.CloudDownload,
+                        contentDescription = "Download",
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
@@ -510,7 +776,8 @@ private fun PlaylistCard(
     onDeleteClick: () -> Unit,
     onClick: () -> Unit,
     cardShape: AbsoluteSmoothCornerShape,
-    isSyncing: Boolean
+    isSyncing: Boolean,
+    isExpanded: Boolean = false
 ) {
     Card(
         modifier = Modifier
@@ -518,7 +785,8 @@ private fun PlaylistCard(
             .clickable(onClick = onClick),
         shape = cardShape,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
+            containerColor = if (isExpanded) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceContainer
         )
     ) {
         Row(
@@ -527,7 +795,6 @@ private fun PlaylistCard(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Playlist cover
             Box(
                 modifier = Modifier
                     .size(56.dp)

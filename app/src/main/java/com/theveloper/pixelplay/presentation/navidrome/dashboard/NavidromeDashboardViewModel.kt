@@ -5,8 +5,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.ExistingWorkPolicy
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import com.theveloper.pixelplay.data.database.NavidromeCacheEntryEntity
 import com.theveloper.pixelplay.data.database.NavidromePlaylistEntity
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.navidrome.NavidromeCacheManager
 import com.theveloper.pixelplay.data.navidrome.NavidromeRepository
 import com.theveloper.pixelplay.data.worker.NavidromeSyncWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,6 +23,7 @@ import javax.inject.Inject
 @HiltViewModel
 class NavidromeDashboardViewModel @Inject constructor(
     private val repository: NavidromeRepository,
+    private val navCacheManager: NavidromeCacheManager,
     private val workManager: WorkManager
 ) : ViewModel() {
 
@@ -39,6 +42,15 @@ class NavidromeDashboardViewModel @Inject constructor(
     private val _selectedPlaylistSongs = MutableStateFlow<List<Song>>(emptyList())
     val selectedPlaylistSongs: StateFlow<List<Song>> = _selectedPlaylistSongs.asStateFlow()
 
+    /** Downloaded songs for the offline cache tab. */
+    val downloadedSongs: StateFlow<List<NavidromeCacheEntryEntity>> =
+        navCacheManager.downloadedSongsFlow
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    /** Per-song download-in-progress flags (navidromeId → true while downloading). */
+    private val _downloadingIds = MutableStateFlow<Set<String>>(emptySet())
+    val downloadingIds: StateFlow<Set<String>> = _downloadingIds.asStateFlow()
+
     val username: String? get() = repository.username
     val serverUrl: String? get() = repository.serverUrl
     val isLoggedIn: StateFlow<Boolean> = repository.isLoggedInFlow
@@ -46,7 +58,6 @@ class NavidromeDashboardViewModel @Inject constructor(
 
     init {
         observeSyncWorker()
-        // Auto sync full library (songs + playlists) if it's been more than 24 hours
         val lastSync = repository.lastFullSyncTime
         val currentTime = System.currentTimeMillis()
         if (currentTime - lastSync > NavidromeRepository.SYNC_THRESHOLD_MS) {
@@ -58,7 +69,7 @@ class NavidromeDashboardViewModel @Inject constructor(
         viewModelScope.launch {
             workManager.getWorkInfosForUniqueWorkFlow(WORK_NAME_SYNC_ALL).collect { workInfos ->
                 val workInfo = workInfos.firstOrNull() ?: return@collect
-                
+
                 when (workInfo.state) {
                     WorkInfo.State.RUNNING -> {
                         _isSyncing.value = true
@@ -121,6 +132,26 @@ class NavidromeDashboardViewModel @Inject constructor(
     fun logout() {
         viewModelScope.launch {
             repository.logout()
+        }
+    }
+
+    fun isCached(navidromeId: String): Boolean = navCacheManager.isCached(navidromeId)
+
+    fun downloadSong(navidromeId: String) {
+        if (_downloadingIds.value.contains(navidromeId)) return
+        viewModelScope.launch {
+            _downloadingIds.value = _downloadingIds.value + navidromeId
+            try {
+                navCacheManager.downloadSong(navidromeId)
+            } finally {
+                _downloadingIds.value = _downloadingIds.value - navidromeId
+            }
+        }
+    }
+
+    fun removeSong(navidromeId: String) {
+        viewModelScope.launch {
+            navCacheManager.removeSong(navidromeId)
         }
     }
 
