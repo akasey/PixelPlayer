@@ -16,18 +16,30 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun/netstack"
 )
 
+// How often the endpoint re-resolver re-checks DNS for roaming (dynamic-DNS) peers.
+const reresolveInterval = 30 * time.Second
+
 var (
-	mu       sync.Mutex
-	dev      *device.Device
-	listener net.Listener
-	tnet     *netstack.Net
+	mu           sync.Mutex
+	dev          *device.Device
+	listener     net.Listener
+	tnet         *netstack.Net
+	stopResolver chan struct{}
 )
+
+// peerEndpoint tracks a peer whose endpoint is a hostname, so it can be re-resolved over time.
+type peerEndpoint struct {
+	publicKeyHex string
+	hostPort     string // original "host:port" from the config
+	lastResolved string // last applied "ip:port"
+}
 
 // StartProxy brings up a userspace WireGuard interface and a SOCKS5 server.
 //
@@ -92,6 +104,19 @@ func StartProxy(uapiConfig string, localAddrsCsv string, dnsCsv string, mtu int,
 
 	go serveSocks(ln, net0)
 
+	// Periodically re-resolve hostname endpoints so dynamic-DNS peers keep working without a
+	// manual reconnect. Seed lastResolved from the initial resolution above.
+	peers := parsePeerEndpoints(uapiConfig)
+	for _, p := range peers {
+		if addr, rerr := net.ResolveUDPAddr("udp", p.hostPort); rerr == nil {
+			p.lastResolved = addr.String()
+		}
+	}
+	if len(peers) > 0 {
+		stopResolver = make(chan struct{})
+		go resolverLoop(d, peers, stopResolver)
+	}
+
 	return ln.Addr().(*net.TCPAddr).Port, nil
 }
 
@@ -128,6 +153,10 @@ func Stats() string {
 }
 
 func stopLocked() {
+	if stopResolver != nil {
+		close(stopResolver)
+		stopResolver = nil
+	}
 	if listener != nil {
 		listener.Close()
 		listener = nil
@@ -137,6 +166,62 @@ func stopLocked() {
 		dev = nil
 	}
 	tnet = nil
+}
+
+// parsePeerEndpoints extracts peers whose endpoint is a hostname (literal-IP endpoints need no
+// re-resolution and are skipped), pairing each with its hex public key for targeted IpcSet updates.
+func parsePeerEndpoints(uapi string) []*peerEndpoint {
+	var all []*peerEndpoint
+	var cur *peerEndpoint
+	for _, line := range strings.Split(uapi, "\n") {
+		switch {
+		case strings.HasPrefix(line, "public_key="):
+			cur = &peerEndpoint{publicKeyHex: strings.TrimSpace(line[len("public_key="):])}
+			all = append(all, cur)
+		case strings.HasPrefix(line, "endpoint=") && cur != nil:
+			cur.hostPort = strings.TrimSpace(line[len("endpoint="):])
+		}
+	}
+	out := make([]*peerEndpoint, 0, len(all))
+	for _, p := range all {
+		if p.hostPort == "" {
+			continue
+		}
+		if _, err := netip.ParseAddrPort(p.hostPort); err == nil {
+			continue // already a literal IP — nothing to re-resolve
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// resolverLoop re-resolves each peer's hostname every reresolveInterval and, when the IP changes,
+// updates only that peer's endpoint via IpcSet (update_only=true preserves all other peer state).
+func resolverLoop(d *device.Device, peers []*peerEndpoint, stop <-chan struct{}) {
+	ticker := time.NewTicker(reresolveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			for _, p := range peers {
+				addr, err := net.ResolveUDPAddr("udp", p.hostPort)
+				if err != nil {
+					continue
+				}
+				resolved := addr.String()
+				if resolved == p.lastResolved {
+					continue
+				}
+				cfg := fmt.Sprintf("public_key=%s\nupdate_only=true\nendpoint=%s\n", p.publicKeyHex, resolved)
+				if err := d.IpcSet(cfg); err != nil {
+					continue
+				}
+				p.lastResolved = resolved
+			}
+		}
+	}
 }
 
 // resolveEndpoints rewrites every "endpoint=host:port" line in a UAPI config so the host is a
