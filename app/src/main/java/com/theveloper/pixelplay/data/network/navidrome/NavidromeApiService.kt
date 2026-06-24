@@ -1,6 +1,8 @@
 package com.theveloper.pixelplay.data.network.navidrome
 
 import com.theveloper.pixelplay.data.navidrome.model.NavidromeCredentials
+import com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardTunnelManager
+import com.theveloper.pixelplay.di.NavidromeOkHttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -10,7 +12,6 @@ import org.json.JSONObject
 import timber.log.Timber
 import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,10 +25,10 @@ import javax.inject.Singleton
  */
 @Singleton
 class NavidromeApiService @Inject constructor(
-    // P1-3: Inject singleton OkHttpClient instead of creating a new one.
-    // Use newBuilder() to apply Navidrome-specific timeouts while sharing the base
-    // connection pool and dispatcher, saving ~2-4MB RAM.
-    baseOkHttpClient: OkHttpClient
+    // Navidrome-qualified client: shares the base connection pool/dispatcher and applies
+    // Navidrome timeouts plus the WireGuard SOCKS proxy selector when the tunnel is enabled.
+    @NavidromeOkHttpClient private val okHttpClient: OkHttpClient,
+    private val tunnelManager: WireGuardTunnelManager
 ) {
 
     companion object {
@@ -40,12 +41,6 @@ class NavidromeApiService @Inject constructor(
     // Current server credentials (can be updated at runtime)
     @Volatile
     private var credentials: NavidromeCredentials? = null
-
-    private val okHttpClient: OkHttpClient = baseOkHttpClient.newBuilder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS) // Longer timeout for streaming
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .build()
 
     // ─── Credentials Management ─────────────────────────────────────────
 
@@ -134,6 +129,8 @@ class NavidromeApiService @Inject constructor(
     private suspend fun request(endpoint: String, params: Map<String, String> = emptyMap()): Result<String> {
         return withContext(Dispatchers.IO) {
             try {
+                // Ensure the WireGuard tunnel is up (when enabled) before any Navidrome request.
+                tunnelManager.ensureReady()
                 val url = buildApiUrl(endpoint, params)
                 Timber.d("$TAG: >>> GET $endpoint")
 

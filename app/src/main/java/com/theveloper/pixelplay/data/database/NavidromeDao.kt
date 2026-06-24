@@ -32,6 +32,10 @@ interface NavidromeDao {
     @Query("SELECT * FROM navidrome_songs WHERE navidrome_id = :navidromeId LIMIT 1")
     suspend fun getSongByNavidromeId(navidromeId: String): NavidromeSongEntity?
 
+    /** One row per Navidrome song id (a song may appear in several playlists). */
+    @Query("SELECT * FROM navidrome_songs WHERE navidrome_id IN (:navidromeIds) GROUP BY navidrome_id")
+    fun getSongsByNavidromeIds(navidromeIds: List<String>): Flow<List<NavidromeSongEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSongs(songs: List<NavidromeSongEntity>)
 

@@ -8,6 +8,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,10 +18,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudQueue
 import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,10 +39,15 @@ import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.theveloper.pixelplay.R
+import com.theveloper.pixelplay.data.database.NavidromeCacheEntryEntity
 import com.theveloper.pixelplay.data.database.NavidromePlaylistEntity
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.navidrome.tunnel.TunnelState
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import com.theveloper.pixelplay.utils.formatTimeAgo
@@ -53,6 +65,10 @@ fun NavidromeDashboardScreen(
     val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle()
     val syncProgress by viewModel.syncProgress.collectAsStateWithLifecycle()
     val syncMessage by viewModel.syncMessage.collectAsStateWithLifecycle()
+    val selectedPlaylistSongs by viewModel.selectedPlaylistSongs.collectAsStateWithLifecycle()
+    val downloadingIds by viewModel.downloadingIds.collectAsStateWithLifecycle()
+    val maxCacheSizeMb by viewModel.maxCacheSizeMb.collectAsStateWithLifecycle()
+    val cacheUsage by viewModel.cacheUsage.collectAsStateWithLifecycle()
 
     val cardShape = AbsoluteSmoothCornerShape(
         cornerRadiusTR = 20.dp, cornerRadiusTL = 20.dp,
@@ -99,10 +115,18 @@ fun NavidromeDashboardScreen(
             syncMessage = syncMessage,
             username = viewModel.username,
             lastSyncTime = viewModel.lastSyncTime,
+            selectedPlaylistSongs = selectedPlaylistSongs,
+            downloadingIds = downloadingIds,
+            maxCacheSizeMb = maxCacheSizeMb,
+            cacheUsage = cacheUsage,
+            onSetMaxCacheSizeMb = { viewModel.setMaxCacheSizeMb(it) },
+            onClearStreamingCache = { viewModel.clearStreamingCache() },
             onSyncAll = { viewModel.syncAllPlaylistsAndSongs() },
             onSyncPlaylist = { viewModel.syncPlaylistSongs(it) },
             onDeletePlaylist = { viewModel.deletePlaylist(it) },
             onLoadPlaylistSongs = { viewModel.loadPlaylistSongs(it) },
+            onDownloadSong = { viewModel.downloadSong(it) },
+            isCached = { viewModel.isCached(it) },
             onLogout = {
                 viewModel.logout()
                 onBack()
@@ -121,25 +145,34 @@ private fun DashboardContent(
     syncMessage: String?,
     username: String?,
     lastSyncTime: Long,
+    selectedPlaylistSongs: List<Song>,
+    downloadingIds: Set<String>,
+    maxCacheSizeMb: Int,
+    cacheUsage: com.theveloper.pixelplay.data.navidrome.CacheUsage,
+    onSetMaxCacheSizeMb: (Int) -> Unit,
+    onClearStreamingCache: () -> Unit,
     onSyncAll: () -> Unit,
     onSyncPlaylist: (String) -> Unit,
     onDeletePlaylist: (String) -> Unit,
     onLoadPlaylistSongs: (String) -> Unit,
+    onDownloadSong: (String) -> Unit,
+    isCached: (String) -> Boolean,
     onLogout: () -> Unit,
     cardShape: AbsoluteSmoothCornerShape,
     paddingValues: PaddingValues
 ) {
+    var expandedPlaylistId by remember { mutableStateOf<String?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(paddingValues)
+            .verticalScroll(rememberScrollState())
     ) {
         // Sync status banner
         AnimatedVisibility(
             visible = syncMessage != null,
-            enter = slideInVertically(
-                animationSpec = spring(stiffness = Spring.StiffnessMedium)
-            ) + fadeIn(),
+            enter = slideInVertically(animationSpec = spring(stiffness = Spring.StiffnessMedium)) + fadeIn(),
             exit = fadeOut()
         ) {
             syncMessage?.let { message ->
@@ -156,9 +189,7 @@ private fun DashboardContent(
                     )
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             if (isSyncing && syncProgress == null) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(20.dp),
@@ -183,7 +214,6 @@ private fun DashboardContent(
                                 )
                             }
                         }
-                        
                         if (isSyncing && syncProgress != null) {
                             Spacer(Modifier.height(12.dp))
                             LinearProgressIndicator(
@@ -208,9 +238,7 @@ private fun DashboardContent(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 shape = cardShape,
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                )
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
@@ -231,9 +259,7 @@ private fun DashboardContent(
                         )
                     }
                     Spacer(Modifier.width(16.dp))
-                    Column(
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = name,
                             style = MaterialTheme.typography.titleMedium,
@@ -257,92 +283,139 @@ private fun DashboardContent(
             }
         }
 
-        SubsonicMenuCard(
-            isSyncing = isSyncing,
-            onSyncAll = onSyncAll,
-            onLogout = onLogout,
-            cardShape = cardShape
+        SubsonicMenuCard(isSyncing = isSyncing, onSyncAll = onSyncAll, onLogout = onLogout, cardShape = cardShape)
+
+        NavidromeTunnelCard(cardShape = cardShape)
+
+        NavidromeCacheCard(
+            maxCacheSizeMb = maxCacheSizeMb,
+            cacheUsage = cacheUsage,
+            onSetMaxCacheSizeMb = onSetMaxCacheSizeMb,
+            onClearStreamingCache = onClearStreamingCache,
+            cardShape = cardShape,
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
-        // Playlists header
-        Row(
+        // Downloaded songs now live in their own top-level Library → Downloads screen.
+        PlaylistsTab(
+            playlists = playlists,
+            isSyncing = isSyncing,
+            selectedPlaylistSongs = selectedPlaylistSongs,
+            expandedPlaylistId = expandedPlaylistId,
+            downloadingIds = downloadingIds,
+            onPlaylistClick = { playlistId ->
+                expandedPlaylistId = if (expandedPlaylistId == playlistId) null else playlistId
+                if (expandedPlaylistId != null) onLoadPlaylistSongs(playlistId)
+            },
+            onSyncPlaylist = onSyncPlaylist,
+            onDeletePlaylist = onDeletePlaylist,
+            onDownloadSong = onDownloadSong,
+            isCached = isCached,
+            onSyncAll = onSyncAll,
+            cardShape = cardShape
+        )
+    }
+}
+
+@Composable
+private fun PlaylistsTab(
+    playlists: List<NavidromePlaylistEntity>,
+    isSyncing: Boolean,
+    selectedPlaylistSongs: List<Song>,
+    expandedPlaylistId: String?,
+    downloadingIds: Set<String>,
+    onPlaylistClick: (String) -> Unit,
+    onSyncPlaylist: (String) -> Unit,
+    onDeletePlaylist: (String) -> Unit,
+    onDownloadSong: (String) -> Unit,
+    isCached: (String) -> Boolean,
+    onSyncAll: () -> Unit,
+    cardShape: AbsoluteSmoothCornerShape
+) {
+    if (playlists.isEmpty() && !isSyncing) {
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(32.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = stringResource(R.string.cloud_dashboard_title_playlists),
-                style = MaterialTheme.typography.titleMedium,
-                fontFamily = GoogleSansRounded,
-                fontWeight = FontWeight.Bold
-            )
-            if (playlists.isEmpty()) {
-                TextButton(onClick = onSyncAll) {
-                    Icon(
-                        Icons.Rounded.Sync,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.cloud_dashboard_action_sync), fontFamily = GoogleSansRounded, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Rounded.CloudQueue,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = stringResource(R.string.cloud_dashboard_playlists_empty_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontFamily = GoogleSansRounded,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.cloud_dashboard_playlists_empty_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
             }
         }
-
-        // Playlist list
-        if (playlists.isEmpty() && !isSyncing) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
+    } else {
+        // Regular Column (not LazyColumn) so the whole dashboard scrolls as one surface;
+        // a dashboard only ever shows a handful of playlists.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (playlists.isEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.Rounded.CloudQueue,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                    )
-                    Spacer(Modifier.height(16.dp))
                     Text(
-                        text = stringResource(R.string.cloud_dashboard_playlists_empty_title),
-                        style = MaterialTheme.typography.bodyLarge,
+                        text = stringResource(R.string.cloud_dashboard_title_playlists),
+                        style = MaterialTheme.typography.titleMedium,
                         fontFamily = GoogleSansRounded,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        fontWeight = FontWeight.Bold
                     )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.cloud_dashboard_playlists_empty_hint),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = GoogleSansRounded,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
+                    TextButton(onClick = onSyncAll) {
+                        Icon(Icons.Rounded.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.cloud_dashboard_action_sync), fontFamily = GoogleSansRounded)
+                    }
                 }
             }
-        } else {
-            LazyColumn(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(
-                    items = playlists,
-                    key = { it.id }
-                ) { playlist ->
-                    PlaylistCard(
-                        playlist = playlist,
-                        onSyncClick = { onSyncPlaylist(playlist.id) },
-                        onDeleteClick = { onDeletePlaylist(playlist.id) },
-                        onClick = { onLoadPlaylistSongs(playlist.id) },
-                        cardShape = cardShape,
-                        isSyncing = isSyncing
-                    )
+            playlists.forEach { playlist ->
+                PlaylistCard(
+                    playlist = playlist,
+                    onSyncClick = { onSyncPlaylist(playlist.id) },
+                    onDeleteClick = { onDeletePlaylist(playlist.id) },
+                    onClick = { onPlaylistClick(playlist.id) },
+                    cardShape = cardShape,
+                    isSyncing = isSyncing,
+                    isExpanded = expandedPlaylistId == playlist.id
+                )
+                if (expandedPlaylistId == playlist.id && selectedPlaylistSongs.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    selectedPlaylistSongs.forEach { song ->
+                        val navidromeId = song.contentUriString.removePrefix("navidrome://")
+                        SongCard(
+                            song = song,
+                            isDownloading = downloadingIds.contains(navidromeId),
+                            isCached = isCached(navidromeId),
+                            onDownloadClick = { onDownloadSong(navidromeId) },
+                            cardShape = cardShape
+                        )
+                        Spacer(Modifier.height(4.dp))
+                    }
                 }
             }
         }
@@ -361,13 +434,9 @@ private fun SubsonicMenuCard(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         shape = cardShape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        )
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = stringResource(R.string.cloud_dashboard_quick_actions),
                 style = MaterialTheme.typography.titleMedium,
@@ -404,16 +473,11 @@ private fun SubsonicMenuCard(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(stringResource(R.string.cloud_sync_status_syncing), fontFamily = GoogleSansRounded)
                     } else {
-                        Icon(
-                            Icons.Rounded.CloudSync,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Icon(Icons.Rounded.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(stringResource(R.string.cloud_dashboard_action_sync_library), fontFamily = GoogleSansRounded)
                     }
                 }
-
                 FilledTonalButton(
                     onClick = onLogout,
                     modifier = Modifier.weight(1f),
@@ -422,11 +486,7 @@ private fun SubsonicMenuCard(
                         contentColor = MaterialTheme.colorScheme.onErrorContainer
                     )
                 ) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.Logout,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(stringResource(R.string.cloud_dashboard_action_disconnect), fontFamily = GoogleSansRounded)
                 }
@@ -436,16 +496,344 @@ private fun SubsonicMenuCard(
 }
 
 @Composable
+private fun NavidromeCacheCard(
+    maxCacheSizeMb: Int,
+    cacheUsage: com.theveloper.pixelplay.data.navidrome.CacheUsage,
+    onSetMaxCacheSizeMb: (Int) -> Unit,
+    onClearStreamingCache: () -> Unit,
+    cardShape: AbsoluteSmoothCornerShape,
+) {
+    // Local slider state so dragging is smooth; the pref is committed on release.
+    var sliderValue by remember(maxCacheSizeMb) { mutableStateOf(maxCacheSizeMb.toFloat()) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = cardShape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.navidrome_cache_card_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontFamily = GoogleSansRounded,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = stringResource(R.string.navidrome_cache_usage_downloads, formatBytes(cacheUsage.downloadBytes)),
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = stringResource(R.string.navidrome_cache_usage_streaming, formatBytes(cacheUsage.streamingBytes)),
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.navidrome_cache_max_size_label),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded
+                )
+                Text(
+                    text = stringResource(R.string.navidrome_cache_max_size_value, sliderValue.toInt()),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Slider(
+                value = sliderValue,
+                onValueChange = { sliderValue = it },
+                onValueChangeFinished = { onSetMaxCacheSizeMb(sliderValue.toInt()) },
+                valueRange = 100f..5000f,
+                steps = 48, // ~100 MB increments
+            )
+            Text(
+                text = stringResource(R.string.navidrome_cache_size_hint),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            FilledTonalButton(
+                onClick = onClearStreamingCache,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            ) {
+                Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.navidrome_cache_clear_action), fontFamily = GoogleSansRounded)
+            }
+        }
+    }
+}
+
+@Composable
+private fun NavidromeTunnelCard(
+    cardShape: AbsoluteSmoothCornerShape,
+    viewModel: NavidromeTunnelViewModel = hiltViewModel()
+) {
+    val context = LocalContext.current
+    val enabled by viewModel.enabled.collectAsStateWithLifecycle()
+    val endpoint by viewModel.endpoint.collectAsStateWithLifecycle()
+    val tunnelState by viewModel.tunnelState.collectAsStateWithLifecycle()
+    val importError by viewModel.importError.collectAsStateWithLifecycle()
+    val testResult by viewModel.testResult.collectAsStateWithLifecycle()
+    val stats by viewModel.stats.collectAsStateWithLifecycle()
+
+    val pickConf = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            }.getOrNull()
+            if (text.isNullOrBlank()) {
+                viewModel.importConfig("") // surfaces an error
+            } else {
+                viewModel.importConfig(text)
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = cardShape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Private tunnel (WireGuard)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Route Navidrome traffic through an app-only WireGuard tunnel to reach a " +
+                    "private server. No system VPN is used.",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (!viewModel.isSupported) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "This build does not include the WireGuard engine. Rebuild with " +
+                        "-Ppixelplay.enableWireguard=true after running tools/wireguard/build-aar.sh.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    fontFamily = GoogleSansRounded
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Enable tunnel",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontFamily = GoogleSansRounded
+                    )
+                    Text(
+                        text = endpoint?.let { "Endpoint: $it" } ?: "No config imported",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = GoogleSansRounded,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { viewModel.setEnabled(it) },
+                    enabled = endpoint != null && viewModel.isSupported
+                )
+            }
+
+            // Live connection state.
+            val stateLabel = when (val s = tunnelState) {
+                is TunnelState.Down -> "Disconnected"
+                is TunnelState.Connecting -> "Connecting…"
+                is TunnelState.Up -> "Connected (SOCKS :${s.socksPort})"
+                is TunnelState.Error -> "Error: ${s.message}"
+            }
+            val stateColor = when (tunnelState) {
+                is TunnelState.Up -> MaterialTheme.colorScheme.primary
+                is TunnelState.Error -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stateLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = stateColor,
+                fontFamily = GoogleSansRounded
+            )
+
+            if (tunnelState is TunnelState.Up) {
+                stats?.let { TunnelStatsBlock(it) }
+            }
+
+            importError?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    fontFamily = GoogleSansRounded
+                )
+            }
+            when (val r = testResult) {
+                is TunnelTestResult.Running -> TunnelTestLine("Testing…", MaterialTheme.colorScheme.onSurfaceVariant)
+                is TunnelTestResult.Success -> TunnelTestLine("Test succeeded", MaterialTheme.colorScheme.primary)
+                is TunnelTestResult.Failure -> TunnelTestLine("Test failed: ${r.message}", MaterialTheme.colorScheme.error)
+                TunnelTestResult.Idle -> {}
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = { pickConf.launch(arrayOf("*/*")) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Upload .conf", fontFamily = GoogleSansRounded)
+                }
+                FilledTonalButton(
+                    onClick = { viewModel.testTunnel() },
+                    enabled = endpoint != null,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Rounded.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Test", fontFamily = GoogleSansRounded)
+                }
+            }
+            if (endpoint != null) {
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { viewModel.clearConfig() }) {
+                    Text("Remove config", color = MaterialTheme.colorScheme.error, fontFamily = GoogleSansRounded)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TunnelTestLine(text: String, color: Color) {
+    Spacer(Modifier.height(4.dp))
+    Text(text = text, style = MaterialTheme.typography.bodySmall, color = color, fontFamily = GoogleSansRounded)
+}
+
+@Composable
+private fun TunnelStatsBlock(stats: TunnelStatsUi) {
+    Spacer(Modifier.height(10.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .padding(12.dp)
+    ) {
+        TunnelStatRow("Last handshake", handshakeAgo(stats.lastHandshakeEpochSec))
+        Spacer(Modifier.height(6.dp))
+        TunnelStatRow(
+            "Download",
+            "${formatRate(stats.downBytesPerSec)}  ·  ${formatBytes(stats.rxBytes)} total"
+        )
+        Spacer(Modifier.height(6.dp))
+        TunnelStatRow(
+            "Upload",
+            "${formatRate(stats.upBytesPerSec)}  ·  ${formatBytes(stats.txBytes)} total"
+        )
+    }
+}
+
+@Composable
+private fun TunnelStatRow(label: String, value: String) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = GoogleSansRounded
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = GoogleSansRounded,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+private fun handshakeAgo(epochSec: Long): String {
+    if (epochSec <= 0L) return "never"
+    val secs = (System.currentTimeMillis() / 1000L - epochSec).coerceAtLeast(0L)
+    return when {
+        secs < 5L -> "just now"
+        secs < 60L -> "${secs}s ago"
+        secs < 3600L -> "${secs / 60L}m ${secs % 60L}s ago"
+        else -> "${secs / 3600L}h ${(secs % 3600L) / 60L}m ago"
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024L) return "$bytes B"
+    val units = arrayOf("KB", "MB", "GB", "TB")
+    var value = bytes.toDouble() / 1024.0
+    var unit = 0
+    while (value >= 1024.0 && unit < units.size - 1) {
+        value /= 1024.0
+        unit++
+    }
+    return "%.1f %s".format(value, units[unit])
+}
+
+private fun formatRate(bytesPerSec: Long): String = "${formatBytes(bytesPerSec)}/s"
+
+@Composable
 private fun SongCard(
     song: Song,
+    isDownloading: Boolean,
+    isCached: Boolean,
+    onDownloadClick: () -> Unit,
     cardShape: AbsoluteSmoothCornerShape
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = cardShape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        )
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
     ) {
         Row(
             modifier = Modifier
@@ -453,7 +841,6 @@ private fun SongCard(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Album art
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -499,6 +886,30 @@ private fun SongCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            when {
+                isCached -> Icon(
+                    Icons.Rounded.CloudDone,
+                    contentDescription = "Downloaded",
+                    modifier = Modifier
+                        .size(40.dp)
+                        .padding(8.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                isDownloading -> CircularProgressIndicator(
+                    modifier = Modifier.size(40.dp).padding(8.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                else -> IconButton(onClick = onDownloadClick) {
+                    Icon(
+                        Icons.Rounded.CloudDownload,
+                        contentDescription = "Download",
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
@@ -510,7 +921,8 @@ private fun PlaylistCard(
     onDeleteClick: () -> Unit,
     onClick: () -> Unit,
     cardShape: AbsoluteSmoothCornerShape,
-    isSyncing: Boolean
+    isSyncing: Boolean,
+    isExpanded: Boolean = false
 ) {
     Card(
         modifier = Modifier
@@ -518,7 +930,8 @@ private fun PlaylistCard(
             .clickable(onClick = onClick),
         shape = cardShape,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
+            containerColor = if (isExpanded) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceContainer
         )
     ) {
         Row(
@@ -527,7 +940,6 @@ private fun PlaylistCard(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Playlist cover
             Box(
                 modifier = Modifier
                     .size(56.dp)

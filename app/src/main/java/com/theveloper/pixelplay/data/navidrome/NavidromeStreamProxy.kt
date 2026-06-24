@@ -1,8 +1,10 @@
 package com.theveloper.pixelplay.data.navidrome
 
 import android.net.Uri
+import com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardTunnelManager
 import com.theveloper.pixelplay.data.stream.CloudStreamProxy
 import com.theveloper.pixelplay.data.stream.CloudStreamSecurity
+import com.theveloper.pixelplay.di.NavidromeOkHttpClient
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import timber.log.Timber
@@ -18,7 +20,8 @@ import javax.inject.Singleton
 @Singleton
 class NavidromeStreamProxy @Inject constructor(
     private val repository: NavidromeRepository,
-    okHttpClient: OkHttpClient
+    private val tunnelManager: WireGuardTunnelManager,
+    @NavidromeOkHttpClient okHttpClient: OkHttpClient
 ) : CloudStreamProxy<String>(okHttpClient) {
 
     // Dynamically determine allowed hosts from the configured server URL.
@@ -69,6 +72,8 @@ class NavidromeStreamProxy @Inject constructor(
         val songId = uri.host ?: uri.path?.removePrefix("/") ?: return
         if (!CloudStreamSecurity.validateNavidromeSongId(songId)) return
         try {
+            // Bring the tunnel up (when enabled) before resolving/streaming.
+            tunnelManager.ensureReady()
             getOrFetchStreamUrl(songId)
         } catch (e: Exception) {
             Timber.w(e, "warmUpStreamUrl failed for $songId")

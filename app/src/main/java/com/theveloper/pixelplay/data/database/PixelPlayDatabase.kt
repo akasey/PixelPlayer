@@ -30,13 +30,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         QqMusicPlaylistEntity::class,
         NavidromeSongEntity::class,
         NavidromePlaylistEntity::class,
+        NavidromeCacheEntryEntity::class,
         TelegramTopicEntity::class,
         JellyfinSongEntity::class,
         JellyfinPlaylistEntity::class,
         AiCacheEntity::class,
         AiUsageEntity::class
     ],
-    version = 42,
+    version = 43,
     exportSchema = true
 )
 abstract class PixelPlayDatabase : RoomDatabase() {
@@ -53,6 +54,7 @@ abstract class PixelPlayDatabase : RoomDatabase() {
     abstract fun localPlaylistDao(): LocalPlaylistDao
     abstract fun qqmusicDao(): QqMusicDao
     abstract fun navidromeDao(): NavidromeDao
+    abstract fun navidromeCacheEntryDao(): NavidromeCacheEntryDao
     abstract fun jellyfinDao(): JellyfinDao
     abstract fun aiCacheDao(): AiCacheDao
     abstract fun aiUsageDao(): AiUsageDao
@@ -646,6 +648,27 @@ abstract class PixelPlayDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_albums_album_artist ON albums(album_artist)")
+            }
+        }
+
+        val MIGRATION_42_43 = object : Migration(42, 43) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS navidrome_cache_entries (
+                        navidrome_id TEXT NOT NULL PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        artist TEXT NOT NULL,
+                        album TEXT NOT NULL,
+                        cover_art_id TEXT,
+                        duration INTEGER NOT NULL,
+                        mime_type TEXT,
+                        play_count INTEGER NOT NULL DEFAULT 0,
+                        is_downloaded INTEGER NOT NULL DEFAULT 0,
+                        size_bytes INTEGER NOT NULL DEFAULT 0,
+                        cached_at INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_navidrome_cache_entries_is_downloaded ON navidrome_cache_entries(is_downloaded)")
             }
         }
 

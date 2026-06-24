@@ -34,6 +34,15 @@ val enableComposeCompilerReports = providers.gradleProperty("pixelplay.enableCom
     .getOrElse("false")
     .toBoolean()
 
+// Application-layer WireGuard tunnel for private Navidrome access.
+// Requires the native AAR built from tools/wireguard/ dropped into app/libs/.
+// Defaults to enabled whenever the AAR is present; pass -Ppixelplay.enableWireguard=false to opt
+// out. The AAR is always required, so builds without it stay green.
+val wireguardAar = file("libs/wireguard-netstack.aar")
+val enableWireguard = providers.gradleProperty("pixelplay.enableWireguard")
+    .map { it.toBoolean() }
+    .getOrElse(wireguardAar.exists()) && wireguardAar.exists()
+
 @Suppress("DEPRECATION")
 android {
     namespace = "com.theveloper.pixelplay"
@@ -81,6 +90,7 @@ android {
             ?: "b18441a1ff607e10a989891a5462e627"
         buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
         buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
+        buildConfigField("boolean", "ENABLE_WIREGUARD", enableWireguard.toString())
     }
 
     signingConfigs {
@@ -242,7 +252,14 @@ dependencies {
 
     // Media & Files
     implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.datasource.okhttp)
     implementation(libs.androidx.media3.ui)
+
+    // Userspace WireGuard tunnel engine (wireguard-go + gVisor netstack), built via
+    // tools/wireguard/build-aar.sh. Optional: only linked when present + flag enabled.
+    if (enableWireguard) {
+        implementation(files("libs/wireguard-netstack.aar"))
+    }
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.exoplayer.ffmpeg)
     implementation(libs.androidx.media3.exoplayer.midi)

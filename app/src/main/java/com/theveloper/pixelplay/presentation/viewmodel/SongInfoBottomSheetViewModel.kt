@@ -47,8 +47,17 @@ class SongInfoBottomSheetViewModel @Inject constructor(
     private val wearPhoneTransferSender: WearPhoneTransferSender,
     private val transferStateStore: PhoneWatchTransferStateStore,
     private val musicDao: MusicDao,
+    private val navidromeDownloadStateHolder: NavidromeDownloadStateHolder,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
+
+    /** IDs of Navidrome songs with a completed pinned download (reactive). */
+    val downloadedNavidromeIds: StateFlow<Set<String>> = navidromeDownloadStateHolder.downloadedIds
+    /** IDs of Navidrome songs whose download is currently in flight. */
+    val downloadingNavidromeIds: StateFlow<Set<String>> = navidromeDownloadStateHolder.downloadingIds
+
+    fun downloadNavidromeSong(navidromeId: String) = navidromeDownloadStateHolder.download(navidromeId)
+    fun removeNavidromeDownload(navidromeId: String) = navidromeDownloadStateHolder.remove(navidromeId)
 
     data class SongLocationInfo(
         val label: String,

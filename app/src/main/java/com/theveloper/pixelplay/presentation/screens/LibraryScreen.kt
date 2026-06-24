@@ -49,6 +49,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Edit
@@ -459,6 +460,7 @@ fun LibraryScreen(
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
     var playlistSheetSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
     val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
+    val downloadedNavidromeIds by playerViewModel.downloadedNavidromeIds.collectAsStateWithLifecycle()
     val tabTitles by playerViewModel.libraryTabsFlow.collectAsStateWithLifecycle()
     val currentTabId by playerViewModel.currentLibraryTabId.collectAsStateWithLifecycle()
     val libraryNavigationMode by playerViewModel.libraryNavigationMode.collectAsStateWithLifecycle()
@@ -906,6 +908,23 @@ fun LibraryScreen(
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
+                            }
+                        }
+                        if (downloadedNavidromeIds.isNotEmpty()) {
+                            FilledIconButton(
+                                modifier = Modifier.padding(end = 8.dp),
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                ),
+                                onClick = {
+                                    navController.navigateSafely(Screen.Downloads.route)
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CloudDownload,
+                                    contentDescription = stringResource(R.string.library_tab_downloads)
+                                )
                             }
                         }
                         FilledIconButton(

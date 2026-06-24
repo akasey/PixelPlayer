@@ -83,6 +83,7 @@ import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
 import com.theveloper.pixelplay.shared.WearIntents
 import com.theveloper.pixelplay.utils.ArtworkTransportSanitizer
 import com.theveloper.pixelplay.utils.MediaItemBuilder
+import com.theveloper.pixelplay.data.navidrome.NavidromeCacheManager
 import com.theveloper.pixelplay.data.navidrome.NavidromeRepository
 import com.theveloper.pixelplay.di.AppScope
 import com.theveloper.pixelplay.presentation.viewmodel.ListeningStatsTracker
@@ -165,6 +166,8 @@ class MusicService : MediaLibraryService() {
     lateinit var replayGainManager: com.theveloper.pixelplay.data.media.ReplayGainManager
     @Inject
     lateinit var navidromeRepository: NavidromeRepository
+    @Inject
+    lateinit var navCacheManager: NavidromeCacheManager
     @Inject
     lateinit var listeningStatsTracker: ListeningStatsTracker
     @Inject
@@ -1246,6 +1249,26 @@ class MusicService : MediaLibraryService() {
         navidromePlaybackReportJob = null
     }
 
+    private fun notifyNavidromeSongCompleted(mediaItem: MediaItem?) {
+        val navidromeId = getNavidromeId(mediaItem) ?: return
+        val metadata = mediaItem?.mediaMetadata ?: return
+        val extras = metadata.extras ?: return
+        val coverArtUri = metadata.artworkUri?.toString()
+        val coverArtId = coverArtUri
+            ?.removePrefix("navidrome_cover://")
+            ?.takeIf { coverArtUri?.startsWith("navidrome_cover://") == true }
+        navCacheManager.onNavidromeSongCompleted(
+            navidromeId = navidromeId,
+            title = metadata.title?.toString() ?: "",
+            artist = metadata.artist?.toString() ?: "",
+            album = extras.getString(MediaItemBuilder.EXTERNAL_EXTRA_ALBUM)
+                ?: metadata.albumTitle?.toString() ?: "",
+            coverArtId = coverArtId,
+            duration = extras.getLong(MediaItemBuilder.EXTERNAL_EXTRA_DURATION, 0L),
+            mimeType = extras.getString(MediaItemBuilder.EXTERNAL_EXTRA_MIME_TYPE)
+        )
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onVolumeChanged(volume: Float) {
             replayGainProcessor.onPlayerVolumeChanged(volume)
@@ -1317,6 +1340,7 @@ class MusicService : MediaLibraryService() {
                 listeningStatsTracker.finalizeCurrentSession()
                 val mediaItem = (mediaSession?.player ?: engine.masterPlayer).currentMediaItem
                 getNavidromeId(mediaItem)?.let { navidromeId ->
+                    notifyNavidromeSongCompleted(mediaItem)
                     appScope.launch(Dispatchers.IO) {
                         navidromeRepository.scrobble(navidromeId, submission = true)
                     }
@@ -1359,6 +1383,7 @@ class MusicService : MediaLibraryService() {
                     val prevId = getNavidromeId(finishedItem)
                     reportNavidromePlayback("stopped", finishedItem)
                     if (prevId != null) {
+                        notifyNavidromeSongCompleted(finishedItem)
                         appScope.launch(Dispatchers.IO) {
                             navidromeRepository.scrobble(prevId, submission = true)
                         }
