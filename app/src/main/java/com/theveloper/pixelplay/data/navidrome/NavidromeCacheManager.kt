@@ -96,13 +96,19 @@ class NavidromeCacheManager @Inject constructor(
         )
     }
 
-    // Cache key factory: navidrome:// URIs use their string as key; others bypass the cache.
+    // Cache key factory. An explicit DataSpec.key (set as MediaItem.customCacheKey by
+    // MediaItemBuilder, e.g. "navidrome://songId") is authoritative: it is the only key that
+    // stays stable across every transport form the same song can take — navidrome:// scheme,
+    // the local proxy URL (dynamic port), the real endpoint (rotating auth token / WireGuard),
+    // or nothing at all when offline. Preferring it guarantees a pinned download is found
+    // regardless of how the URI was resolved. Falls back to the navidrome:// URI, then the raw
+    // URI string, so non-cloud (content://, file://) playback is unaffected.
     private val cacheKeyFactory = CacheKeyFactory { dataSpec ->
         val uri = dataSpec.uri
         when {
-            uri.scheme == "navidrome" -> uri.toString()
             !dataSpec.key.isNullOrEmpty() -> dataSpec.key!!
-            else -> dataSpec.uri.toString()
+            uri.scheme == "navidrome" -> uri.toString()
+            else -> uri.toString()
         }
     }
 

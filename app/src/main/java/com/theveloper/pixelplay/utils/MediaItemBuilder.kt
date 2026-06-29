@@ -99,13 +99,28 @@ object MediaItemBuilder {
     const val EXTERNAL_EXTRA_NAVIDROME_ID = EXTERNAL_EXTRA_PREFIX + "NAVIDROME_ID"
 
     fun build(song: Song): MediaItem {
+        val uri = playbackUri(song)
         return MediaItem.Builder()
             .setMediaId(song.id)
-            .setUri(playbackUri(song))
+            .setUri(uri)
             .setMimeType(playbackMimeType(song))
+            .apply { stableCacheKey(uri)?.let { setCustomCacheKey(it) } }
             .setMediaMetadata(buildMediaMetadataForSong(song))
             .build()
     }
+
+    /**
+     * Stable, transport-independent cache key for cloud songs that have a pinned offline
+     * download cache (currently Navidrome). Returns the canonical `scheme://id` string so the
+     * key never depends on the resolved transport URL — which varies by proxy port, WireGuard
+     * tunnel, rotating auth token, or is absent entirely when offline. Without this, a song
+     * downloaded under `navidrome://id` would miss the cache whenever ExoPlayer's DataSpec
+     * carries the proxy/endpoint URL instead, breaking offline (airplane-mode) playback.
+     *
+     * Must stay byte-for-byte identical to the key used by NavidromeCacheManager.downloadSong().
+     */
+    fun stableCacheKey(uri: Uri): String? =
+        if (uri.scheme == "navidrome") uri.toString() else null
 
     fun buildForExternalController(context: Context, song: Song): MediaItem {
         // This is the MediaSession item path for Android Auto / other external controllers;
@@ -113,10 +128,12 @@ object MediaItemBuilder {
         return com.theveloper.pixelplay.data.diagnostics.PerformanceMetrics.time(
             com.theveloper.pixelplay.data.diagnostics.PerformanceMetrics.Timings.MEDIASESSION_ITEM_BUILD
         ) {
+            val uri = playbackUri(song)
             MediaItem.Builder()
                 .setMediaId(song.id)
-                .setUri(playbackUri(song))
+                .setUri(uri)
                 .setMimeType(playbackMimeType(song))
+                .apply { stableCacheKey(uri)?.let { setCustomCacheKey(it) } }
                 .setMediaMetadata(
                     buildMediaMetadataForSong(
                         song = song,
