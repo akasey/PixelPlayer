@@ -36,6 +36,18 @@ class NavidromeDashboardViewModel @Inject constructor(
     val maxCacheSizeMb: StateFlow<Int> = userPreferencesRepository.navidromeMaxCacheSizeMbFlow
         .stateIn(viewModelScope, SharingStarted.Lazily, 500)
 
+    /** Budget for evictable auto-downloads, in MB (0 = unlimited). */
+    val autoDownloadMaxSizeMb: StateFlow<Int> = userPreferencesRepository.navidromeAutoDownloadMaxSizeMbFlow
+        .stateIn(viewModelScope, SharingStarted.Lazily, 1024)
+
+    /** Completed-play count that triggers an auto-download (0 = disabled). */
+    val autoDownloadThreshold: StateFlow<Int> = userPreferencesRepository.navidromeAutoDownloadThresholdFlow
+        .stateIn(viewModelScope, SharingStarted.Lazily, 3)
+
+    /** Whether auto-downloads are restricted to un-metered (Wi‑Fi) connections. */
+    val autoDownloadWifiOnly: StateFlow<Boolean> = userPreferencesRepository.navidromeAutoDownloadWifiOnlyFlow
+        .stateIn(viewModelScope, SharingStarted.Lazily, true)
+
     private val _cacheUsage = MutableStateFlow(CacheUsage(0L, 0L))
     val cacheUsage: StateFlow<CacheUsage> = _cacheUsage.asStateFlow()
 
@@ -45,6 +57,22 @@ class NavidromeDashboardViewModel @Inject constructor(
 
     fun setMaxCacheSizeMb(sizeMb: Int) {
         viewModelScope.launch { userPreferencesRepository.setNavidromeMaxCacheSizeMb(sizeMb) }
+    }
+
+    fun setAutoDownloadMaxSizeMb(sizeMb: Int) {
+        viewModelScope.launch {
+            userPreferencesRepository.setNavidromeAutoDownloadMaxSizeMb(sizeMb)
+            // The cache manager re-enforces the budget reactively; refresh usage once it settles.
+            refreshCacheUsage()
+        }
+    }
+
+    fun setAutoDownloadThreshold(threshold: Int) {
+        viewModelScope.launch { userPreferencesRepository.setNavidromeAutoDownloadThreshold(threshold) }
+    }
+
+    fun setAutoDownloadWifiOnly(wifiOnly: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setNavidromeAutoDownloadWifiOnly(wifiOnly) }
     }
 
     fun refreshCacheUsage() {

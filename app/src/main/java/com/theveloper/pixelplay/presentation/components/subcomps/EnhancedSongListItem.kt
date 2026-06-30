@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -97,6 +98,7 @@ fun EnhancedSongListItem(
     selectionIndex: Int? = null,
     isSelectionMode: Boolean = false,
     showMoreOptionsButton: Boolean = true,
+    trailingContent: (@Composable RowScope.() -> Unit)? = null,
     onLongPress: () -> Unit = {},
     onMoreOptionsClick: (Song) -> Unit,
     onClick: () -> Unit
@@ -358,6 +360,11 @@ fun EnhancedSongListItem(
                     )
                 }
                 
+                if (trailingContent != null && !isSelectionMode) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    trailingContent()
+                }
+
                 val showPlayingIndicator = isCurrentSong && !isSelectionMode
                 val showTrailingAction = showMoreOptionsButton && !isSelectionMode
 

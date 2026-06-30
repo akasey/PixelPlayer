@@ -318,9 +318,17 @@ class MusicRepositoryImpl @Inject constructor(
         return musicDao.getCloudSongCount().distinctUntilChanged()
     }
 
-    override suspend fun getRandomSongs(limit: Int): List<Song> = withContext(Dispatchers.IO) {
+    override suspend fun getRandomSongs(limit: Int): List<Song> =
+        getRandomSongs(limit, StorageFilter.ALL)
+
+    override suspend fun getRandomSongs(limit: Int, storageFilter: StorageFilter): List<Song> = withContext(Dispatchers.IO) {
         val filter = cachedDirFilter.value
-        musicDao.getRandomSongs(limit, filter.allowedParentDirs, filter.applyFilter).map { it.toSong() }
+        musicDao.getRandomSongs(
+            limit = limit,
+            allowedParentDirs = filter.allowedParentDirs,
+            applyDirectoryFilter = filter.applyFilter,
+            filterMode = storageFilter.toFilterMode()
+        ).map { it.toSong() }
     }
 
     override suspend fun getSongsPage(
@@ -435,6 +443,7 @@ class MusicRepositoryImpl @Inject constructor(
         StorageFilter.ALL -> 0
         StorageFilter.OFFLINE -> 1
         StorageFilter.ONLINE -> 2
+        StorageFilter.DOWNLOADED -> 3
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

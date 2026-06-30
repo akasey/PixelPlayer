@@ -231,6 +231,7 @@ class PlayerViewModel @Inject constructor(
     fun downloadNavidromeSong(navidromeId: String) = navidromeDownloadStateHolder.download(navidromeId)
     fun removeNavidromeDownload(navidromeId: String) = navidromeDownloadStateHolder.remove(navidromeId)
     fun downloadNavidromeSongs(navidromeIds: Collection<String>) = navidromeDownloadStateHolder.downloadAll(navidromeIds)
+    fun removeNavidromeDownloads(navidromeIds: Collection<String>) = navidromeDownloadStateHolder.removeAll(navidromeIds)
 
     // Dedicated queue flow so the player sheet's MiniPlayer branch does not
     // recompose whenever the queue changes. Consumers that actually need the
@@ -981,6 +982,7 @@ class PlayerViewModel @Inject constructor(
         currentStorageFilter = { playerUiState.value.currentStorageFilter },
         albums = { libraryStateHolder.albums.value },
         artists = { libraryStateHolder.artists.value },
+        downloadedNavidromeIds = { navidromeDownloadStateHolder.downloadedIds.value },
         playShuffled = { songs, queueName -> playSongsShuffled(songs, queueName, startAtZero = true) },
     )
 
@@ -2017,7 +2019,8 @@ class PlayerViewModel @Inject constructor(
         val next = when (current) {
             com.theveloper.pixelplay.data.model.StorageFilter.ALL -> com.theveloper.pixelplay.data.model.StorageFilter.ONLINE
             com.theveloper.pixelplay.data.model.StorageFilter.ONLINE -> com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE
-            com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE -> com.theveloper.pixelplay.data.model.StorageFilter.ALL
+            com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE -> com.theveloper.pixelplay.data.model.StorageFilter.DOWNLOADED
+            com.theveloper.pixelplay.data.model.StorageFilter.DOWNLOADED -> com.theveloper.pixelplay.data.model.StorageFilter.ALL
         }
         setStorageFilter(next)
     }

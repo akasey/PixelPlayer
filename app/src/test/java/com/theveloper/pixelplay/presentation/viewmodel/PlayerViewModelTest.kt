@@ -282,6 +282,7 @@ class PlayerViewModelTest {
             playbackDispatchStateHolder,
             mockContext
         )
+        val mockNavidromeDownloadStateHolder: NavidromeDownloadStateHolder = mockk(relaxed = true)
         playerViewModel = PlayerViewModel(
             mockContext,
             mockMusicRepository,
@@ -315,6 +316,7 @@ class PlayerViewModelTest {
             mockPlaylistSelectionStateHolder,
             playbackDispatchStateHolder,
             mediaControllerSyncStateHolder,
+            mockNavidromeDownloadStateHolder,
             sessionToken,
             mockMediaControllerFactory
         )

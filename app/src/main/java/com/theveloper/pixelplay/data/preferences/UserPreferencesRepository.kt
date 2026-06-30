@@ -251,6 +251,7 @@ class UserPreferencesRepository @Inject constructor(
         val NAVIDROME_MAX_CACHE_SIZE_MB = intPreferencesKey("navidrome_max_cache_size_mb")
         val NAVIDROME_AUTO_DOWNLOAD_THRESHOLD = intPreferencesKey("navidrome_auto_download_threshold")
         val NAVIDROME_AUTO_DOWNLOAD_WIFI_ONLY = booleanPreferencesKey("navidrome_auto_download_wifi_only")
+        val NAVIDROME_AUTO_DOWNLOAD_MAX_SIZE_MB = intPreferencesKey("navidrome_auto_download_max_size_mb")
 
         // Navidrome application-layer WireGuard tunnel
         val NAVIDROME_TUNNEL_ENABLED = booleanPreferencesKey("navidrome_tunnel_enabled")
@@ -1391,6 +1392,14 @@ suspend fun markDirectoryRulesVersionApplied(version: Int) {
 
     suspend fun setNavidromeAutoDownloadWifiOnly(wifiOnly: Boolean) {
         dataStore.edit { it[PreferencesKeys.NAVIDROME_AUTO_DOWNLOAD_WIFI_ONLY] = wifiOnly }
+    }
+
+    /** Budget for evictable auto-downloads, in MB. 0 = unlimited. Default 1 GB. */
+    val navidromeAutoDownloadMaxSizeMbFlow: Flow<Int> =
+        pref { (it[PreferencesKeys.NAVIDROME_AUTO_DOWNLOAD_MAX_SIZE_MB] ?: 1024).coerceIn(0, 20_000) }
+
+    suspend fun setNavidromeAutoDownloadMaxSizeMb(sizeMb: Int) {
+        dataStore.edit { it[PreferencesKeys.NAVIDROME_AUTO_DOWNLOAD_MAX_SIZE_MB] = sizeMb.coerceIn(0, 20_000) }
     }
 
     /** Whether Navidrome traffic is routed through the application-layer WireGuard tunnel. */

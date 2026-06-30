@@ -86,7 +86,12 @@ import coil.compose.AsyncImagePainter
 import coil.size.Size
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.Album
+import com.theveloper.pixelplay.data.model.filterByStorage
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import androidx.compose.foundation.layout.RowScope
 import com.theveloper.pixelplay.presentation.components.CollapsibleCommonTopBar
+import com.theveloper.pixelplay.presentation.components.DownloadAllAction
 import com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar
 import com.theveloper.pixelplay.ui.theme.LocalShowScrollbar
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
@@ -120,6 +125,15 @@ fun AlbumDetailScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
     val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
+    // Active library filter + downloaded set, so the detail screen mirrors the library's filter
+    // (e.g. DOWNLOADED shows/plays/shuffles only offline-available tracks of this album).
+    val storageFilter by remember(playerViewModel) {
+        playerViewModel.playerUiState
+            .map { it.currentStorageFilter }
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = com.theveloper.pixelplay.data.model.StorageFilter.ALL)
+    val downloadedNavidromeIds by playerViewModel.downloadedNavidromeIds.collectAsStateWithLifecycle()
+    val downloadingNavidromeIds by playerViewModel.downloadingNavidromeIds.collectAsStateWithLifecycle()
     val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
 
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
@@ -186,7 +200,13 @@ fun AlbumDetailScreen(
 
             uiState.album != null -> {
                 val album = uiState.album!!
-                val songs = uiState.songs
+                val songs = remember(uiState.songs, storageFilter, downloadedNavidromeIds) {
+                    uiState.songs.filterByStorage(storageFilter, downloadedNavidromeIds)
+                }
+                // Downloadable (Navidrome) ids across the whole album, regardless of the active filter.
+                val albumNavidromeIds = remember(uiState.songs) {
+                    uiState.songs.mapNotNull { it.navidromeId }
+                }
                 val songsByDisc = remember(songs) {
                     songs.groupBy { it.discNumber ?: 1 }
                 }
@@ -374,6 +394,15 @@ fun AlbumDetailScreen(
                                     val randomSong = songs.random()
                                     playerViewModel.showAndPlaySong(randomSong, songs)
                                 }
+                            },
+                            actions = {
+                                DownloadAllAction(
+                                    navidromeIds = albumNavidromeIds,
+                                    downloadedIds = downloadedNavidromeIds,
+                                    downloadingIds = downloadingNavidromeIds,
+                                    onDownloadAll = { playerViewModel.downloadNavidromeSongs(it) },
+                                    onRemoveAll = { playerViewModel.removeNavidromeDownloads(it) }
+                                )
                             }
                         )
                     } else {
@@ -506,7 +535,8 @@ private fun SharedAlbumTopBarProbe(
     headerImageRequestSize: Size,
     onHeaderArtworkState: ((AsyncImagePainter.State) -> Unit)? = null,
     onBackPressed: () -> Unit,
-    onPlayClick: () -> Unit
+    onPlayClick: () -> Unit,
+    actions: @Composable RowScope.() -> Unit = {}
 ) {
     val surfaceColor = MaterialTheme.colorScheme.surface
     val statusBarColor =
@@ -596,7 +626,8 @@ private fun SharedAlbumTopBarProbe(
             contentColor = MaterialTheme.colorScheme.onSurface,
             subtitleColor = MaterialTheme.colorScheme.onSurfaceVariant,
             fadeSubtitleOnCollapse = false,
-            syncStatusBarWithContainer = false
+            syncStatusBarWithContainer = false,
+            actions = actions
         )
 
         LargeExtendedFloatingActionButton(

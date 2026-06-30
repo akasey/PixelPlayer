@@ -88,7 +88,13 @@ class LibraryStateHolder @Inject constructor(
             _currentStorageFilter,
             userPreferencesRepository.hideLocalMediaFlow
         ) { filter, hideLocal ->
-            if (hideLocal) com.theveloper.pixelplay.data.model.StorageFilter.ONLINE else filter
+            // "Hide local media" forces ONLINE — except under the DOWNLOADED filter, which is an
+            // explicit "available offline" view (local + pinned) and must not be overridden.
+            if (hideLocal && filter != com.theveloper.pixelplay.data.model.StorageFilter.DOWNLOADED) {
+                com.theveloper.pixelplay.data.model.StorageFilter.ONLINE
+            } else {
+                filter
+            }
         }
 
     private fun effectiveFoldersStorageFilter(

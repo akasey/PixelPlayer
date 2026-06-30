@@ -1,13 +1,12 @@
 package com.theveloper.pixelplay.presentation.viewmodel
 
+import com.theveloper.pixelplay.data.database.DownloadSource
 import com.theveloper.pixelplay.data.navidrome.NavidromeCacheManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -32,22 +31,18 @@ class NavidromeDownloadStateHolder @Inject constructor(
             .map { entries -> entries.mapTo(HashSet()) { it.navidromeId } as Set<String> }
             .stateIn(scope, SharingStarted.Eagerly, emptySet())
 
-    private val _downloadingIds = MutableStateFlow<Set<String>>(emptySet())
-    /** IDs of songs whose download is currently in flight. */
-    val downloadingIds: StateFlow<Set<String>> = _downloadingIds.asStateFlow()
+    /**
+     * IDs of songs whose download is currently in flight. Sourced from the cache manager so manual
+     * taps and auto-downloads (via the worker) surface a single, consistent spinner.
+     */
+    val downloadingIds: StateFlow<Set<String>> = cacheManager.inFlightIds
 
     /** Downloads (or no-ops if already downloaded/in-flight) the audio for [navidromeId]. */
     fun download(navidromeId: String) {
-        if (_downloadingIds.value.contains(navidromeId)) return
+        if (downloadingIds.value.contains(navidromeId)) return
         if (downloadedIds.value.contains(navidromeId)) return
-        scope.launch {
-            _downloadingIds.value = _downloadingIds.value + navidromeId
-            try {
-                cacheManager.downloadSong(navidromeId)
-            } finally {
-                _downloadingIds.value = _downloadingIds.value - navidromeId
-            }
-        }
+        // Manual download — de-dupe and in-flight tracking live in cacheManager.downloadSong.
+        scope.launch { cacheManager.downloadSong(navidromeId, DownloadSource.MANUAL) }
     }
 
     /** Removes the pinned download for [navidromeId]. */
@@ -55,8 +50,18 @@ class NavidromeDownloadStateHolder @Inject constructor(
         scope.launch { cacheManager.removeSong(navidromeId) }
     }
 
+    /** Promotes an auto-download to a permanent manual download (the Downloads "Keep" action). */
+    fun keep(navidromeId: String) {
+        scope.launch { cacheManager.keepDownload(navidromeId) }
+    }
+
     /** Downloads every id not already downloaded/in-flight (used for "Download all"). */
     fun downloadAll(navidromeIds: Collection<String>) {
         navidromeIds.forEach { download(it) }
+    }
+
+    /** Removes the pinned downloads for every id (used for "Remove all" on an album/artist). */
+    fun removeAll(navidromeIds: Collection<String>) {
+        navidromeIds.forEach { remove(it) }
     }
 }
