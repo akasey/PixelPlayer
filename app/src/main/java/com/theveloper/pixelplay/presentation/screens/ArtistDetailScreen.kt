@@ -69,7 +69,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.data.model.Artist
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.model.filterByStorage
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import androidx.compose.foundation.layout.RowScope
 import com.theveloper.pixelplay.presentation.components.CollapsibleCommonTopBar
+import com.theveloper.pixelplay.presentation.components.DownloadAllAction
 import com.theveloper.pixelplay.presentation.components.ExpressiveScrollBar
 import com.theveloper.pixelplay.ui.theme.LocalShowScrollbar
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
@@ -126,6 +131,15 @@ fun ArtistDetailScreen(
     val lazyListState = rememberLazyListState()
     val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
+    // Active library filter + downloaded set, so the artist screen mirrors the library's filter
+    // (e.g. DOWNLOADED shows/plays/shuffles only this artist's offline-available tracks).
+    val storageFilter by remember(playerViewModel) {
+        playerViewModel.playerUiState
+            .map { it.currentStorageFilter }
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = com.theveloper.pixelplay.data.model.StorageFilter.ALL)
+    val downloadedNavidromeIds by playerViewModel.downloadedNavidromeIds.collectAsStateWithLifecycle()
+    val downloadingNavidromeIds by playerViewModel.downloadingNavidromeIds.collectAsStateWithLifecycle()
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
     val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
     val systemNavBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -266,10 +280,22 @@ fun ArtistDetailScreen(
                 }
                 uiState.artist != null -> {
                     val artist = uiState.artist!!
-                    val songs = uiState.songs
+                    val songs = remember(uiState.songs, storageFilter, downloadedNavidromeIds) {
+                        uiState.songs.filterByStorage(storageFilter, downloadedNavidromeIds)
+                    }
                     val currentTopBarHeightDp = with(density) { topBarHeight.value.toDp() }
 
-                    val albumSections = uiState.albumSections
+                    // Downloadable (Navidrome) ids across the whole artist, regardless of the active filter.
+                    val artistNavidromeIds = remember(uiState.songs) {
+                        uiState.songs.mapNotNull { it.navidromeId }
+                    }
+
+                    // Filter each release section to the active filter and drop now-empty sections.
+                    val albumSections = remember(uiState.albumSections, storageFilter, downloadedNavidromeIds) {
+                        uiState.albumSections
+                            .map { section -> section.copy(songs = section.songs.filterByStorage(storageFilter, downloadedNavidromeIds)) }
+                            .filter { it.songs.isNotEmpty() }
+                    }
                     val expandedSections = remember { mutableStateMapOf<String, Boolean>() }
                     LaunchedEffect(albumSections) {
                         val currentKeys = albumSections.map { it.collapseKey() }.toSet()
@@ -425,7 +451,16 @@ fun ArtistDetailScreen(
                                 }
                             },
                             onChangeImage = { imagePickerLauncher.launch("image/*") },
-                            onClearCustomImage = { viewModel.clearCustomImage() }
+                            onClearCustomImage = { viewModel.clearCustomImage() },
+                            actions = {
+                                DownloadAllAction(
+                                    navidromeIds = artistNavidromeIds,
+                                    downloadedIds = downloadedNavidromeIds,
+                                    downloadingIds = downloadingNavidromeIds,
+                                    onDownloadAll = { playerViewModel.downloadNavidromeSongs(it) },
+                                    onRemoveAll = { playerViewModel.removeNavidromeDownloads(it) }
+                                )
+                            }
                         )
                     } else {
                         CustomCollapsingTopBar(
@@ -737,7 +772,8 @@ private fun SharedArtistTopBarProbe(
     onBackPressed: () -> Unit,
     onPlayClick: () -> Unit,
     onChangeImage: () -> Unit,
-    onClearCustomImage: () -> Unit
+    onClearCustomImage: () -> Unit,
+    actions: @Composable RowScope.() -> Unit = {}
 ) {
     var showImageMenu by remember { mutableStateOf(false) }
     val surfaceColor = MaterialTheme.colorScheme.surface
@@ -839,6 +875,8 @@ private fun SharedArtistTopBarProbe(
             fadeSubtitleOnCollapse = false,
             syncStatusBarWithContainer = false,
             actions = {
+                // Bulk download/remove for the artist, ahead of the image-edit menu.
+                actions()
                 Box(
                     modifier = Modifier.padding(end = 12.dp, top = 4.dp)
                 ) {

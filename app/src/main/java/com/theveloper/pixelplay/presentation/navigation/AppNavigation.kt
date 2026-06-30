@@ -48,7 +48,6 @@ import com.theveloper.pixelplay.presentation.screens.MashupScreen
 import com.theveloper.pixelplay.presentation.screens.NavBarCornerRadiusScreen
 import com.theveloper.pixelplay.presentation.screens.PaletteStyleSettingsScreen
 import com.theveloper.pixelplay.presentation.screens.PlaylistDetailScreen
-import com.theveloper.pixelplay.presentation.screens.DownloadsScreen
 import com.theveloper.pixelplay.presentation.screens.RecentlyPlayedScreen
 
 import com.theveloper.pixelplay.presentation.screens.AboutScreen
@@ -301,16 +300,6 @@ fun AppNavigation(
             ) {
                 ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
                     StatsScreen(
-                        navController = navController
-                    )
-                }
-            }
-            composable(
-                Screen.Downloads.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    DownloadsScreen(
-                        playerViewModel = playerViewModel,
                         navController = navController
                     )
                 }

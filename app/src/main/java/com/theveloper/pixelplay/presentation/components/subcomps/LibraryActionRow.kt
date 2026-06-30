@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Dataset
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material3.ButtonDefaults
@@ -344,39 +345,38 @@ fun LibraryActionRow(
                          com.theveloper.pixelplay.data.model.StorageFilter.ALL -> Icons.Rounded.Dataset
                          com.theveloper.pixelplay.data.model.StorageFilter.ONLINE -> Icons.Rounded.Cloud
                          com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE -> Icons.Rounded.PhoneAndroid
+                         com.theveloper.pixelplay.data.model.StorageFilter.DOWNLOADED -> Icons.Rounded.DownloadDone
                      }
                      val tooltipText = when(currentStorageFilter) {
                          com.theveloper.pixelplay.data.model.StorageFilter.ALL -> stringResource(R.string.library_storage_filter_all_songs)
                          com.theveloper.pixelplay.data.model.StorageFilter.ONLINE -> stringResource(R.string.library_storage_filter_online)
                          com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE -> stringResource(R.string.library_storage_filter_offline)
+                         com.theveloper.pixelplay.data.model.StorageFilter.DOWNLOADED -> stringResource(R.string.library_storage_filter_downloaded)
                      }
-                     val tooltipState = rememberTooltipState()
-
-                    @OptIn(ExperimentalMaterial3Api::class)
-                    TooltipBox(
-                        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
-                        tooltip = {
-                            PlainTooltip {
-                                Text(tooltipText)
-                            }
-                        },
-                        state = tooltipState
+                    // Labeled pill so the active filter is readable at a glance, not just an icon.
+                    FilledTonalButton(
+                        onClick = onStorageFilterClick,
+                        shape = RoundedCornerShape(
+                            topStart = filterStartCorner,
+                            bottomStart = filterStartCorner,
+                            topEnd = filterEndCorner,
+                            bottomEnd = filterEndCorner
+                        ),
+                        contentPadding = PaddingValues(horizontal = 14.dp),
+                        modifier = Modifier.height(genHeight)
                     ) {
-                        FilledTonalIconButton(
-                            onClick = onStorageFilterClick,
-                            shape = RoundedCornerShape(
-                                topStart = filterStartCorner,
-                                bottomStart = filterStartCorner,
-                                topEnd = filterEndCorner,
-                                bottomEnd = filterEndCorner
-                            ),
-                            modifier = Modifier.size(genHeight)
-                        ) {
-                             Icon(
-                                imageVector = finalIcon,
-                                contentDescription = tooltipText
-                            )
-                        }
+                        Icon(
+                            imageVector = finalIcon,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = tooltipText,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 

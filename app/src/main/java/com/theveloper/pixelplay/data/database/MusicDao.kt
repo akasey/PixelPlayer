@@ -582,13 +582,39 @@ interface MusicDao {
     @Query("""
         SELECT * FROM songs
         WHERE (:applyDirectoryFilter = 0 OR id < 0 OR parent_directory_path IN (:allowedParentDirs))
+        AND (
+            :filterMode = 0
+            OR (
+                :filterMode = 1
+                AND source_type = 0
+            )
+            OR (
+                :filterMode = 2
+                AND source_type != 0
+            )
+            OR (
+                :filterMode = 3
+                AND (
+                    source_type = 0
+                    OR (
+                        source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = content_uri_string
+                        )
+                    )
+                )
+            )
+        )
         ORDER BY RANDOM()
         LIMIT :limit
     """)
     suspend fun getRandomSongs(
         limit: Int,
         allowedParentDirs: List<String> = emptyList(),
-        applyDirectoryFilter: Boolean = false
+        applyDirectoryFilter: Boolean = false,
+        filterMode: Int = 0
     ): List<SongEntity>
 
     @Query("""
@@ -656,6 +682,20 @@ interface MusicDao {
                 :filterMode = 2
                 AND source_type != 0
             )
+            OR (
+                :filterMode = 3
+                AND (
+                    source_type = 0
+                    OR (
+                        source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = content_uri_string
+                        )
+                    )
+                )
+            )
         )
         ORDER BY parent_directory_path ASC, title ASC
     """)
@@ -677,6 +717,20 @@ interface MusicDao {
             OR (
                 :filterMode = 2
                 AND source_type != 0
+            )
+            OR (
+                :filterMode = 3
+                AND (
+                    source_type = 0
+                    OR (
+                        source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = content_uri_string
+                        )
+                    )
+                )
             )
         )
         ORDER BY
@@ -714,6 +768,20 @@ interface MusicDao {
             OR (
                 :filterMode = 2
                 AND songs.source_type != 0
+            )
+            OR (
+                :filterMode = 3
+                AND (
+                    songs.source_type = 0
+                    OR (
+                        songs.source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = songs.content_uri_string
+                        )
+                    )
+                )
             )
         )
         ORDER BY
@@ -753,6 +821,20 @@ interface MusicDao {
                 :filterMode = 2
                 AND source_type != 0
             )
+            OR (
+                :filterMode = 3
+                AND (
+                    source_type = 0
+                    OR (
+                        source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = content_uri_string
+                        )
+                    )
+                )
+            )
         )
         ORDER BY
             CASE WHEN :sortOrder = 'song_default_order' THEN track_number END ASC,
@@ -791,6 +873,20 @@ interface MusicDao {
             OR (
                 :filterMode = 2
                 AND source_type != 0
+            )
+            OR (
+                :filterMode = 3
+                AND (
+                    source_type = 0
+                    OR (
+                        source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = content_uri_string
+                        )
+                    )
+                )
             )
         )
         ORDER BY
@@ -837,6 +933,20 @@ interface MusicDao {
                 :filterMode = 2
                 AND songs.source_type != 0
             )
+            OR (
+                :filterMode = 3
+                AND (
+                    songs.source_type = 0
+                    OR (
+                        songs.source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = songs.content_uri_string
+                        )
+                    )
+                )
+            )
         )
         ORDER BY
             CASE WHEN :sortOrder = 'liked_title_az' THEN songs.title END COLLATE NOCASE ASC,
@@ -874,6 +984,20 @@ interface MusicDao {
                 :filterMode = 2
                 AND songs.source_type != 0
             )
+            OR (
+                :filterMode = 3
+                AND (
+                    songs.source_type = 0
+                    OR (
+                        songs.source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = songs.content_uri_string
+                        )
+                    )
+                )
+            )
         )
         ORDER BY songs.title COLLATE NOCASE ASC
     """)
@@ -897,6 +1021,20 @@ interface MusicDao {
             OR (
                 :filterMode = 2
                 AND songs.source_type != 0
+            )
+            OR (
+                :filterMode = 3
+                AND (
+                    songs.source_type = 0
+                    OR (
+                        songs.source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = songs.content_uri_string
+                        )
+                    )
+                )
             )
         )
         ORDER BY
@@ -937,6 +1075,20 @@ interface MusicDao {
             OR (
                 :filterMode = 2
                 AND songs.source_type != 0
+            )
+            OR (
+                :filterMode = 3
+                AND (
+                    songs.source_type = 0
+                    OR (
+                        songs.source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = songs.content_uri_string
+                        )
+                    )
+                )
             )
         )
     """)
@@ -1102,6 +1254,20 @@ interface MusicDao {
                 :filterMode = 2
                 AND songs.source_type != 0
             )
+            OR (
+                :filterMode = 3
+                AND (
+                    songs.source_type = 0
+                    OR (
+                        songs.source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = songs.content_uri_string
+                        )
+                    )
+                )
+            )
         )
         GROUP BY
             albums.id,
@@ -1145,6 +1311,20 @@ interface MusicDao {
             OR (
                 :filterMode = 2
                 AND songs.source_type != 0
+            )
+            OR (
+                :filterMode = 3
+                AND (
+                    songs.source_type = 0
+                    OR (
+                        songs.source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = songs.content_uri_string
+                        )
+                    )
+                )
             )
         )
         GROUP BY
@@ -1202,6 +1382,20 @@ interface MusicDao {
             OR (
                 :filterMode = 2
                 AND songs.source_type != 0
+            )
+            OR (
+                :filterMode = 3
+                AND (
+                    songs.source_type = 0
+                    OR (
+                        songs.source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = songs.content_uri_string
+                        )
+                    )
+                )
             )
         )
         GROUP BY
@@ -1408,6 +1602,20 @@ interface MusicDao {
                 :filterMode = 2
                 AND songs.source_type != 0
             )
+            OR (
+                :filterMode = 3
+                AND (
+                    songs.source_type = 0
+                    OR (
+                        songs.source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = songs.content_uri_string
+                        )
+                    )
+                )
+            )
         )
         GROUP BY artists.id
         ORDER BY
@@ -1441,6 +1649,20 @@ interface MusicDao {
             OR (
                 :filterMode = 2
                 AND songs.source_type != 0
+            )
+            OR (
+                :filterMode = 3
+                AND (
+                    songs.source_type = 0
+                    OR (
+                        songs.source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = songs.content_uri_string
+                        )
+                    )
+                )
             )
         )
         GROUP BY artists.id
@@ -1866,6 +2088,20 @@ interface MusicDao {
             OR (
                 :filterMode = 2
                 AND songs.source_type != 0
+            )
+            OR (
+                :filterMode = 3
+                AND (
+                    songs.source_type = 0
+                    OR (
+                        songs.source_type = 5
+                        AND EXISTS (
+                            SELECT 1 FROM navidrome_cache_entries nce
+                            WHERE nce.is_downloaded = 1
+                            AND ('navidrome://' || nce.navidrome_id) = songs.content_uri_string
+                        )
+                    )
+                )
             )
         )
         GROUP BY artists.id

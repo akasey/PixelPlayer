@@ -69,6 +69,9 @@ fun NavidromeDashboardScreen(
     val downloadingIds by viewModel.downloadingIds.collectAsStateWithLifecycle()
     val maxCacheSizeMb by viewModel.maxCacheSizeMb.collectAsStateWithLifecycle()
     val cacheUsage by viewModel.cacheUsage.collectAsStateWithLifecycle()
+    val autoDownloadThreshold by viewModel.autoDownloadThreshold.collectAsStateWithLifecycle()
+    val autoDownloadWifiOnly by viewModel.autoDownloadWifiOnly.collectAsStateWithLifecycle()
+    val autoDownloadMaxSizeMb by viewModel.autoDownloadMaxSizeMb.collectAsStateWithLifecycle()
 
     val cardShape = AbsoluteSmoothCornerShape(
         cornerRadiusTR = 20.dp, cornerRadiusTL = 20.dp,
@@ -119,7 +122,13 @@ fun NavidromeDashboardScreen(
             downloadingIds = downloadingIds,
             maxCacheSizeMb = maxCacheSizeMb,
             cacheUsage = cacheUsage,
+            autoDownloadThreshold = autoDownloadThreshold,
+            autoDownloadWifiOnly = autoDownloadWifiOnly,
+            autoDownloadMaxSizeMb = autoDownloadMaxSizeMb,
             onSetMaxCacheSizeMb = { viewModel.setMaxCacheSizeMb(it) },
+            onSetAutoDownloadThreshold = { viewModel.setAutoDownloadThreshold(it) },
+            onSetAutoDownloadWifiOnly = { viewModel.setAutoDownloadWifiOnly(it) },
+            onSetAutoDownloadMaxSizeMb = { viewModel.setAutoDownloadMaxSizeMb(it) },
             onClearStreamingCache = { viewModel.clearStreamingCache() },
             onSyncAll = { viewModel.syncAllPlaylistsAndSongs() },
             onSyncPlaylist = { viewModel.syncPlaylistSongs(it) },
@@ -149,7 +158,13 @@ private fun DashboardContent(
     downloadingIds: Set<String>,
     maxCacheSizeMb: Int,
     cacheUsage: com.theveloper.pixelplay.data.navidrome.CacheUsage,
+    autoDownloadThreshold: Int,
+    autoDownloadWifiOnly: Boolean,
+    autoDownloadMaxSizeMb: Int,
     onSetMaxCacheSizeMb: (Int) -> Unit,
+    onSetAutoDownloadThreshold: (Int) -> Unit,
+    onSetAutoDownloadWifiOnly: (Boolean) -> Unit,
+    onSetAutoDownloadMaxSizeMb: (Int) -> Unit,
     onClearStreamingCache: () -> Unit,
     onSyncAll: () -> Unit,
     onSyncPlaylist: (String) -> Unit,
@@ -290,7 +305,13 @@ private fun DashboardContent(
         NavidromeCacheCard(
             maxCacheSizeMb = maxCacheSizeMb,
             cacheUsage = cacheUsage,
+            autoDownloadThreshold = autoDownloadThreshold,
+            autoDownloadWifiOnly = autoDownloadWifiOnly,
+            autoDownloadMaxSizeMb = autoDownloadMaxSizeMb,
             onSetMaxCacheSizeMb = onSetMaxCacheSizeMb,
+            onSetAutoDownloadThreshold = onSetAutoDownloadThreshold,
+            onSetAutoDownloadWifiOnly = onSetAutoDownloadWifiOnly,
+            onSetAutoDownloadMaxSizeMb = onSetAutoDownloadMaxSizeMb,
             onClearStreamingCache = onClearStreamingCache,
             cardShape = cardShape,
         )
@@ -499,12 +520,20 @@ private fun SubsonicMenuCard(
 private fun NavidromeCacheCard(
     maxCacheSizeMb: Int,
     cacheUsage: com.theveloper.pixelplay.data.navidrome.CacheUsage,
+    autoDownloadThreshold: Int,
+    autoDownloadWifiOnly: Boolean,
+    autoDownloadMaxSizeMb: Int,
     onSetMaxCacheSizeMb: (Int) -> Unit,
+    onSetAutoDownloadThreshold: (Int) -> Unit,
+    onSetAutoDownloadWifiOnly: (Boolean) -> Unit,
+    onSetAutoDownloadMaxSizeMb: (Int) -> Unit,
     onClearStreamingCache: () -> Unit,
     cardShape: AbsoluteSmoothCornerShape,
 ) {
     // Local slider state so dragging is smooth; the pref is committed on release.
     var sliderValue by remember(maxCacheSizeMb) { mutableStateOf(maxCacheSizeMb.toFloat()) }
+    var thresholdValue by remember(autoDownloadThreshold) { mutableStateOf(autoDownloadThreshold.toFloat()) }
+    var budgetValue by remember(autoDownloadMaxSizeMb) { mutableStateOf(autoDownloadMaxSizeMb.toFloat()) }
 
     Card(
         modifier = Modifier
@@ -523,7 +552,12 @@ private fun NavidromeCacheCard(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = stringResource(R.string.navidrome_cache_usage_downloads, formatBytes(cacheUsage.downloadBytes)),
+                text = stringResource(
+                    R.string.navidrome_cache_usage_downloads_split,
+                    formatBytes(cacheUsage.downloadBytes),
+                    formatBytes(cacheUsage.manualDownloadBytes),
+                    formatBytes(cacheUsage.autoDownloadBytes)
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 fontFamily = GoogleSansRounded,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -562,6 +596,110 @@ private fun NavidromeCacheCard(
             )
             Text(
                 text = stringResource(R.string.navidrome_cache_size_hint),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = stringResource(R.string.navidrome_auto_download_section),
+                style = MaterialTheme.typography.titleSmall,
+                fontFamily = GoogleSansRounded,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Auto-download threshold (0 = off).
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.navidrome_auto_download_threshold_label),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded
+                )
+                Text(
+                    text = if (thresholdValue.toInt() <= 0)
+                        stringResource(R.string.navidrome_auto_download_threshold_off)
+                    else
+                        stringResource(R.string.navidrome_auto_download_threshold_value, thresholdValue.toInt()),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Slider(
+                value = thresholdValue,
+                onValueChange = { thresholdValue = it },
+                onValueChangeFinished = { onSetAutoDownloadThreshold(thresholdValue.toInt()) },
+                valueRange = 0f..20f,
+                steps = 19,
+            )
+            Text(
+                text = stringResource(R.string.navidrome_auto_download_threshold_hint),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+            )
+
+            // Auto-download Wi-Fi-only toggle.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.navidrome_auto_download_wifi_only_label),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = autoDownloadWifiOnly,
+                    onCheckedChange = onSetAutoDownloadWifiOnly
+                )
+            }
+
+            // Auto-download budget (0 = unlimited).
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.navidrome_auto_download_budget_label),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded
+                )
+                Text(
+                    text = if (budgetValue.toInt() <= 0)
+                        stringResource(R.string.navidrome_auto_download_budget_unlimited)
+                    else
+                        stringResource(R.string.navidrome_auto_download_budget_value, budgetValue.toInt()),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = GoogleSansRounded,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Slider(
+                value = budgetValue,
+                onValueChange = { budgetValue = it },
+                onValueChangeFinished = { onSetAutoDownloadMaxSizeMb(budgetValue.toInt()) },
+                // 0 = unlimited, then 500 MB .. 10 GB in ~500 MB steps.
+                valueRange = 0f..10000f,
+                steps = 19,
+            )
+            Text(
+                text = stringResource(R.string.navidrome_auto_download_budget_hint),
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = GoogleSansRounded,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)

@@ -1197,6 +1197,18 @@ class DualPlayerEngine @Inject constructor(
 
     suspend fun resolveCloudUri(uri: Uri): Uri = withContext(Dispatchers.IO) {
         val uriString = uri.toString()
+
+        // Fully-downloaded Navidrome songs must bypass the proxy entirely so ExoPlayer's
+        // CacheDataSource can hit the pinned download cache (key = "navidrome://songId").
+        // This check comes before resolvedUriCache to prevent a stale proxy URL from
+        // being served when the song is already available offline.
+        if (uri.scheme == "navidrome") {
+            val songId = uri.host ?: uri.path?.removePrefix("/")
+            if (!songId.isNullOrEmpty() && navCacheManager.isCached(songId)) {
+                return@withContext uri
+            }
+        }
+
         resolvedUriCache.get(uriString)?.let { return@withContext it }
 
         val resolved: Uri? = when (uri.scheme) {
@@ -1251,6 +1263,10 @@ class DualPlayerEngine @Inject constructor(
     }
 
     private suspend fun resolveNavidromeUriAsync(uriString: String): Uri? = withContext(Dispatchers.IO) {
+        if (!connectivityStateHolder.isOnline.value) {
+            connectivityStateHolder.triggerOfflineBlockedEvent()
+            return@withContext null
+        }
         if (!navidromeStreamProxy.ensureReady(5_000L)) return@withContext null
         navidromeStreamProxy.warmUpStreamUrl(uriString)
         navidromeStreamProxy.resolveNavidromeUri(uriString)?.toUri()

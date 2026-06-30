@@ -37,7 +37,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AiCacheEntity::class,
         AiUsageEntity::class
     ],
-    version = 43,
+    version = 44,
     exportSchema = true
 )
 abstract class PixelPlayDatabase : RoomDatabase() {
@@ -669,6 +669,21 @@ abstract class PixelPlayDatabase : RoomDatabase() {
                     )
                 """.trimIndent())
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_navidrome_cache_entries_is_downloaded ON navidrome_cache_entries(is_downloaded)")
+            }
+        }
+
+        val MIGRATION_43_44 = object : Migration(43, 44) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val columns = getTableColumns(db, "navidrome_cache_entries")
+                if ("download_source" !in columns) {
+                    db.execSQL("ALTER TABLE navidrome_cache_entries ADD COLUMN download_source INTEGER NOT NULL DEFAULT 0")
+                }
+                if ("last_played_at" !in columns) {
+                    db.execSQL("ALTER TABLE navidrome_cache_entries ADD COLUMN last_played_at INTEGER NOT NULL DEFAULT 0")
+                }
+                // Pre-existing downloads were all explicit pins — mark them MANUAL (2) so the new
+                // auto-download budget can never evict songs the user already kept offline.
+                db.execSQL("UPDATE navidrome_cache_entries SET download_source = 2 WHERE is_downloaded = 1")
             }
         }
 

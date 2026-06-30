@@ -16,16 +16,20 @@ import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.database.StandaloneDatabaseProvider
+import com.theveloper.pixelplay.data.database.DownloadSource
 import com.theveloper.pixelplay.data.database.NavidromeCacheEntryDao
 import com.theveloper.pixelplay.data.database.NavidromeCacheEntryEntity
 import com.theveloper.pixelplay.data.database.NavidromeDao
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
-import com.theveloper.pixelplay.presentation.viewmodel.ConnectivityStateHolder
+import com.theveloper.pixelplay.data.worker.NavidromeAutoDownloadWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,7 +46,6 @@ class NavidromeCacheManager @Inject constructor(
     private val navidromeDao: NavidromeDao,
     private val navidromeRepository: NavidromeRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
-    private val connectivityStateHolder: ConnectivityStateHolder,
     private val tunnelManager: com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardTunnelManager,
     @com.theveloper.pixelplay.di.NavidromeOkHttpClient
     private val navidromeOkHttpClient: okhttp3.OkHttpClient
@@ -58,9 +61,24 @@ class NavidromeCacheManager @Inject constructor(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    private val _inFlightIds = MutableStateFlow<Set<String>>(emptySet())
+    /**
+     * IDs of songs whose pinned download is currently being written. Shared by every download
+     * surface (manual taps via [NavidromeDownloadStateHolder] and auto-downloads via the worker)
+     * so the UI can show a single consistent spinner and concurrent requests de-duplicate.
+     */
+    val inFlightIds: StateFlow<Set<String>> = _inFlightIds.asStateFlow()
+
     init {
-        // Correct any stale "downloaded" rows off the main thread at startup.
+        // Correct any stale "downloaded" rows (and drop orphan blobs) off the main thread at startup.
         scope.launch { reconcileDownloads() }
+        // Re-enforce the auto-download budget at startup and whenever the user changes it, so a
+        // lowered budget shrinks the cache immediately instead of waiting for the next auto-download.
+        scope.launch {
+            userPreferencesRepository.navidromeAutoDownloadMaxSizeMbFlow.collect {
+                enforceAutoDownloadBudget()
+            }
+        }
     }
 
     // Both caches share one database provider; SimpleCache requires distinct directories.
@@ -96,13 +114,19 @@ class NavidromeCacheManager @Inject constructor(
         )
     }
 
-    // Cache key factory: navidrome:// URIs use their string as key; others bypass the cache.
+    // Cache key factory. An explicit DataSpec.key (set as MediaItem.customCacheKey by
+    // MediaItemBuilder, e.g. "navidrome://songId") is authoritative: it is the only key that
+    // stays stable across every transport form the same song can take — navidrome:// scheme,
+    // the local proxy URL (dynamic port), the real endpoint (rotating auth token / WireGuard),
+    // or nothing at all when offline. Preferring it guarantees a pinned download is found
+    // regardless of how the URI was resolved. Falls back to the navidrome:// URI, then the raw
+    // URI string, so non-cloud (content://, file://) playback is unaffected.
     private val cacheKeyFactory = CacheKeyFactory { dataSpec ->
         val uri = dataSpec.uri
         when {
-            uri.scheme == "navidrome" -> uri.toString()
             !dataSpec.key.isNullOrEmpty() -> dataSpec.key!!
-            else -> dataSpec.uri.toString()
+            uri.scheme == "navidrome" -> uri.toString()
+            else -> uri.toString()
         }
     }
 
@@ -140,9 +164,19 @@ class NavidromeCacheManager @Inject constructor(
         return contentLength > 0
     }
 
-    /** Bytes currently held by pinned downloads and the transient streaming cache. */
-    fun cacheUsageBytes(): CacheUsage =
-        CacheUsage(downloadBytes = downloadCache.cacheSpace, streamingBytes = streamingCache.cacheSpace)
+    /**
+     * Bytes currently held by pinned downloads and the transient streaming cache. [downloadBytes]
+     * is the on-disk pinned total; [autoDownloadBytes]/[manualDownloadBytes] split it by origin
+     * (from Room) so the dashboard can show what is evictable vs permanent.
+     */
+    suspend fun cacheUsageBytes(): CacheUsage = withContext(Dispatchers.IO) {
+        CacheUsage(
+            downloadBytes = downloadCache.cacheSpace,
+            streamingBytes = streamingCache.cacheSpace,
+            autoDownloadBytes = cacheEntryDao.getAutoDownloadedBytes(),
+            manualDownloadBytes = cacheEntryDao.getManualDownloadedBytes()
+        )
+    }
 
     /** Evicts the entire transient streaming cache (does not touch pinned downloads). */
     suspend fun clearStreamingCache() = withContext(Dispatchers.IO) {
@@ -152,9 +186,11 @@ class NavidromeCacheManager @Inject constructor(
     }
 
     /**
-     * Reconciles Room with the pinned cache: any row flagged downloaded whose audio is missing
-     * from the pinned store is corrected to not-downloaded, so the Downloads list never lies
-     * (e.g. after a manual file deletion or cache corruption).
+     * Reconciles Room with the pinned cache in both directions:
+     *  - any row flagged downloaded whose audio is missing from the pinned store is corrected to
+     *    not-downloaded, so the Downloads list never lies (e.g. after a manual file deletion);
+     *  - any blob in the pinned store with no corresponding downloaded row is removed, reclaiming
+     *    the partial bytes left behind when a download is interrupted (process killed mid-write).
      */
     suspend fun reconcileDownloads() = withContext(Dispatchers.IO) {
         runCatching {
@@ -164,6 +200,17 @@ class NavidromeCacheManager @Inject constructor(
                     cacheEntryDao.markAsNotDownloaded(entry.navidromeId)
                 }
             }
+
+            val trackedKeys = cacheEntryDao.getDownloadedList()
+                .mapTo(HashSet()) { "navidrome://${it.navidromeId}" }
+            downloadCache.keys.toList().forEach { key ->
+                // Skip in-flight downloads — their row isn't marked downloaded yet by design.
+                val inFlight = _inFlightIds.value.any { "navidrome://$it" == key }
+                if (key !in trackedKeys && !inFlight) {
+                    Timber.tag(TAG).w("reconcileDownloads: orphan blob %s — removing", key)
+                    runCatching { downloadCache.removeResource(key) }
+                }
+            }
         }.onFailure { Timber.tag(TAG).e(it, "reconcileDownloads: failed") }
     }
 
@@ -171,12 +218,40 @@ class NavidromeCacheManager @Inject constructor(
     val downloadedSongsFlow: Flow<List<NavidromeCacheEntryEntity>> =
         cacheEntryDao.getDownloadedFlow()
 
+    /** Promotes an auto-download to a permanent manual download so it is never LRU-evicted. */
+    suspend fun keepDownload(navidromeId: String) = withContext(Dispatchers.IO) {
+        cacheEntryDao.promoteToManual(navidromeId)
+    }
+
     /**
      * Downloads the audio for [navidromeId] to [SimpleCache] directly from the Navidrome
      * stream URL (bypassing the Ktor proxy). The cache key is `navidrome://songId` so ExoPlayer
      * hits the cache on subsequent playback without any network calls.
+     *
+     * [source] records why the song was pinned (see [DownloadSource]):
+     *  - [DownloadSource.MANUAL] is permanent — a manual request also promotes an existing auto
+     *    download so it is never evicted.
+     *  - [DownloadSource.AUTO] is evictable under the auto-download budget; an auto request never
+     *    demotes a song the user pinned manually, and runs budget enforcement on completion.
+     *
+     * In-flight requests for the same id de-duplicate via [inFlightIds].
      */
-    suspend fun downloadSong(navidromeId: String) = withContext(Dispatchers.IO) {
+    suspend fun downloadSong(
+        navidromeId: String,
+        source: Int = DownloadSource.MANUAL
+    ) = withContext(Dispatchers.IO) {
+        if (_inFlightIds.value.contains(navidromeId)) {
+            Timber.tag(TAG).d("downloadSong: already in flight for %s — skipping", navidromeId)
+            return@withContext
+        }
+
+        // Already downloaded: reconcile the source only. A manual request promotes an existing auto
+        // download to permanent; an auto request leaves a manual download untouched.
+        if (isCached(navidromeId)) {
+            if (source == DownloadSource.MANUAL) cacheEntryDao.promoteToManual(navidromeId)
+            return@withContext
+        }
+
         val songEntity = navidromeDao.getSongByNavidromeId(navidromeId)
         if (songEntity == null) {
             Timber.tag(TAG).w("downloadSong: no song entity found for id=%s", navidromeId)
@@ -211,8 +286,9 @@ class NavidromeCacheManager @Inject constructor(
             null
         )
 
+        _inFlightIds.value = _inFlightIds.value + navidromeId
         try {
-            Timber.tag(TAG).d("downloadSong: starting download for %s", navidromeId)
+            Timber.tag(TAG).d("downloadSong: starting download for %s (source=%d)", navidromeId, source)
             val cacheWriter = CacheWriter(cacheDataSource, dataSpec, null, null)
             cacheWriter.cache()
 
@@ -220,8 +296,12 @@ class NavidromeCacheManager @Inject constructor(
                 downloadCache.getContentMetadata(cacheKey)
             ).coerceAtLeast(0)
 
-            // Ensure entry exists in Room (may already be there if song was played before)
+            // Ensure entry exists in Room (may already be there if song was played before).
+            // Never demote a song already kept manually.
             val existing = cacheEntryDao.getById(navidromeId)
+            val effectiveSource =
+                if (existing?.downloadSource == DownloadSource.MANUAL) DownloadSource.MANUAL else source
+            val now = System.currentTimeMillis()
             if (existing == null) {
                 cacheEntryDao.upsert(
                     NavidromeCacheEntryEntity(
@@ -234,15 +314,46 @@ class NavidromeCacheManager @Inject constructor(
                         mimeType = songEntity.mimeType,
                         isDownloaded = true,
                         sizeBytes = sizeBytes,
-                        cachedAt = System.currentTimeMillis()
+                        cachedAt = now,
+                        downloadSource = effectiveSource,
+                        lastPlayedAt = now
                     )
                 )
             } else {
-                cacheEntryDao.markAsDownloaded(navidromeId, sizeBytes, System.currentTimeMillis())
+                cacheEntryDao.markAsDownloaded(navidromeId, sizeBytes, now, effectiveSource)
             }
             Timber.tag(TAG).d("downloadSong: completed for %s, %d bytes", navidromeId, sizeBytes)
+
+            if (effectiveSource == DownloadSource.AUTO) enforceAutoDownloadBudget()
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "downloadSong: failed for %s", navidromeId)
+        } finally {
+            _inFlightIds.value = _inFlightIds.value - navidromeId
+        }
+    }
+
+    /**
+     * Evicts the least-recently-played auto-downloads until the auto-download pool fits the user's
+     * budget (`navidromeAutoDownloadMaxSizeMb`, 0 = unlimited). Manual downloads are never touched.
+     * The song just downloaded has the newest `last_played_at`, so it is safe from its own pass.
+     */
+    private suspend fun enforceAutoDownloadBudget() {
+        val budgetMb = userPreferencesRepository.navidromeAutoDownloadMaxSizeMbFlow.first()
+        if (budgetMb <= 0) return // unlimited
+        val budgetBytes = budgetMb * 1024L * 1024L
+
+        val total = cacheEntryDao.getAutoDownloadedBytes()
+        if (total <= budgetBytes) return
+
+        val candidates = cacheEntryDao.getAutoDownloadEvictionCandidates()
+            .map { it.navidromeId to it.sizeBytes }
+        val toEvict = selectAutoDownloadsToEvict(candidates, total, budgetBytes)
+
+        toEvict.forEach { id ->
+            Timber.tag(TAG).d("enforceAutoDownloadBudget: evicting %s", id)
+            runCatching { downloadCache.removeResource("navidrome://$id") }
+                .onFailure { Timber.tag(TAG).e(it, "enforceAutoDownloadBudget: removeResource failed for %s", id) }
+            cacheEntryDao.markAsNotDownloaded(id)
         }
     }
 
@@ -263,7 +374,10 @@ class NavidromeCacheManager @Inject constructor(
 
     /**
      * Called by MusicService when a Navidrome song completes playback (scrobble submission).
-     * Increments the play count and triggers an auto-download if the threshold is reached.
+     * Increments the play count and, once the threshold is reached, enqueues a constrained
+     * [NavidromeAutoDownloadWorker]. WorkManager holds the job until the network constraint is
+     * satisfied (un-metered when WiFi-only is on), so a song that crosses the threshold offline
+     * downloads automatically on the next eligible connection instead of being silently dropped.
      */
     fun onNavidromeSongCompleted(
         navidromeId: String,
@@ -275,7 +389,10 @@ class NavidromeCacheManager @Inject constructor(
         mimeType: String?
     ) {
         scope.launch {
-            cacheEntryDao.recordPlay(navidromeId, title, artist, album, coverArtId, duration, mimeType)
+            cacheEntryDao.recordPlay(
+                navidromeId, title, artist, album, coverArtId, duration, mimeType,
+                System.currentTimeMillis()
+            )
 
             val threshold = userPreferencesRepository.navidromeAutoDownloadThresholdFlow.first()
             if (threshold <= 0) return@launch // auto-download disabled
@@ -285,13 +402,9 @@ class NavidromeCacheManager @Inject constructor(
             if (isCached(navidromeId)) return@launch // already cached
 
             val wifiOnly = userPreferencesRepository.navidromeAutoDownloadWifiOnlyFlow.first()
-            if (wifiOnly && !connectivityStateHolder.isWifiEnabled.value) {
-                Timber.tag(TAG).d("onNavidromeSongCompleted: deferring auto-download (not on WiFi) for %s", navidromeId)
-                return@launch
-            }
-
-            Timber.tag(TAG).d("onNavidromeSongCompleted: auto-downloading %s (plays=%d)", navidromeId, playCount)
-            downloadSong(navidromeId)
+            Timber.tag(TAG).d("onNavidromeSongCompleted: scheduling auto-download for %s (plays=%d, wifiOnly=%b)",
+                navidromeId, playCount, wifiOnly)
+            NavidromeAutoDownloadWorker.enqueue(context, navidromeId, wifiOnly)
         }
     }
 
@@ -303,8 +416,38 @@ class NavidromeCacheManager @Inject constructor(
     }
 }
 
+/**
+ * Pure selection of which auto-downloads to evict to bring the pool within [budgetBytes].
+ * [candidatesOldestFirst] is `id to sizeBytes` ordered least-recently-played first (the eviction
+ * order). Evicts from the oldest end until the running total fits the budget. A non-positive
+ * budget means "unlimited" and evicts nothing. Extracted as a pure function for unit testing.
+ */
+internal fun selectAutoDownloadsToEvict(
+    candidatesOldestFirst: List<Pair<String, Long>>,
+    currentTotalBytes: Long,
+    budgetBytes: Long
+): List<String> {
+    if (budgetBytes <= 0) return emptyList() // unlimited
+    var total = currentTotalBytes
+    if (total <= budgetBytes) return emptyList()
+
+    val toEvict = mutableListOf<String>()
+    for ((id, size) in candidatesOldestFirst) {
+        if (total <= budgetBytes) break
+        toEvict += id
+        total -= size
+    }
+    return toEvict
+}
+
 /** Bytes held by each Navidrome cache tier. */
 data class CacheUsage(
+    /** Total on-disk size of the pinned download cache (auto + manual). */
     val downloadBytes: Long,
+    /** Transient as-you-play streaming cache size. */
     val streamingBytes: Long,
+    /** Portion of [downloadBytes] held by evictable auto-downloads. */
+    val autoDownloadBytes: Long = 0L,
+    /** Portion of [downloadBytes] held by permanent manual downloads. */
+    val manualDownloadBytes: Long = 0L,
 )

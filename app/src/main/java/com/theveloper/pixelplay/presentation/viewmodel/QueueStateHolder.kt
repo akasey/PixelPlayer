@@ -4,6 +4,7 @@ import com.theveloper.pixelplay.data.model.Album
 import com.theveloper.pixelplay.data.model.Artist
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.model.StorageFilter
+import com.theveloper.pixelplay.data.model.filterByStorage
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import com.theveloper.pixelplay.utils.QueueUtils
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +31,8 @@ class ShufflePlaybackCallbacks(
     val currentStorageFilter: () -> StorageFilter,
     val albums: () -> List<Album>,
     val artists: () -> List<Artist>,
+    /** navidromeIds of completed pinned downloads, for scoping shuffle under the DOWNLOADED filter. */
+    val downloadedNavidromeIds: () -> Set<String>,
     val playShuffled: (songs: List<Song>, queueName: String) -> Unit,
 )
 
@@ -180,7 +183,12 @@ class QueueStateHolder @Inject constructor(
         callbacks: ShufflePlaybackCallbacks
     ) {
         callbacks.scope.launch {
-            val randomSongs = musicRepository.getRandomSongs(limit = SHUFFLE_SAMPLE_LIMIT)
+            // Respect the active library filter so e.g. the DOWNLOADED filter shuffles only
+            // offline-available songs, CLOUD only streaming, etc.
+            val randomSongs = musicRepository.getRandomSongs(
+                limit = SHUFFLE_SAMPLE_LIMIT,
+                storageFilter = callbacks.currentStorageFilter()
+            )
             if (randomSongs.isNotEmpty()) {
                 callbacks.playShuffled(randomSongs, queueName)
             }
@@ -211,10 +219,13 @@ class QueueStateHolder @Inject constructor(
      */
     fun shuffleRandomAlbum(callbacks: ShufflePlaybackCallbacks) {
         callbacks.scope.launch {
+            // albums() is already scoped to the active filter, so a DOWNLOADED-filtered album list
+            // only contains albums with offline songs; scope the chosen album's tracks to match.
             val allAlbums = callbacks.albums()
             if (allAlbums.isEmpty()) return@launch
             val randomAlbum = allAlbums.random()
             val albumSongs = musicRepository.getSongsForAlbum(randomAlbum.id).first()
+                .filterByStorage(callbacks.currentStorageFilter(), callbacks.downloadedNavidromeIds())
             if (albumSongs.isNotEmpty()) {
                 callbacks.playShuffled(albumSongs, randomAlbum.title)
             }
@@ -230,6 +241,7 @@ class QueueStateHolder @Inject constructor(
             if (allArtists.isEmpty()) return@launch
             val randomArtist = allArtists.random()
             val artistSongs = musicRepository.getSongsForArtist(randomArtist.id).first()
+                .filterByStorage(callbacks.currentStorageFilter(), callbacks.downloadedNavidromeIds())
             if (artistSongs.isNotEmpty()) {
                 callbacks.playShuffled(artistSongs, randomArtist.name)
             }

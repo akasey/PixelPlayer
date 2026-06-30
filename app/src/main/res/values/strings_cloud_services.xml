@@ -173,10 +173,25 @@
     <string name="navidrome_cache_max_size_value">%1$d MB</string>
     <string name="navidrome_cache_size_hint">Applies on next app start. Downloads are kept separately and never count toward this limit.</string>
     <string name="navidrome_cache_usage_downloads">Downloads: %1$s</string>
+    <string name="navidrome_cache_usage_downloads_split">Downloads: %1$s (kept %2$s · auto %3$s)</string>
     <string name="navidrome_cache_usage_streaming">Streaming cache: %1$s</string>
     <string name="navidrome_cache_clear_action">Clear streaming cache</string>
     <string name="navidrome_downloads_empty_title">No downloads yet</string>
     <string name="navidrome_downloads_empty_hint">Download songs from the song menu or player to keep them available offline.</string>
+
+    <!-- Navidrome auto-download -->
+    <string name="navidrome_auto_download_section">Auto-download</string>
+    <string name="navidrome_auto_download_threshold_label">Auto-download after</string>
+    <string name="navidrome_auto_download_threshold_value">%1$d plays</string>
+    <string name="navidrome_auto_download_threshold_off">Off</string>
+    <string name="navidrome_auto_download_threshold_hint">Songs you finish this many times are kept offline automatically. Set to Off to disable.</string>
+    <string name="navidrome_auto_download_wifi_only_label">Auto-download on Wi‑Fi only</string>
+    <string name="navidrome_auto_download_budget_label">Auto-download budget</string>
+    <string name="navidrome_auto_download_budget_value">%1$d MB</string>
+    <string name="navidrome_auto_download_budget_unlimited">Unlimited</string>
+    <string name="navidrome_auto_download_budget_hint">When auto-downloads exceed this, the least-recently-played ones are removed. Songs you download or keep manually are never removed.</string>
+    <string name="navidrome_download_badge_auto">Auto</string>
+    <string name="navidrome_download_action_keep">Keep</string>
 
     <!-- Jellyfin Auth -->
     <string name="auth_jellyfin_connect_subtitle">Enter your Jellyfin server URL and account credentials.</string>

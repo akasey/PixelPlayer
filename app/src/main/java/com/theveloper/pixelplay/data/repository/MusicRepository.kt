@@ -96,6 +96,9 @@ interface MusicRepository {
      */
     suspend fun getRandomSongs(limit: Int): List<Song>
 
+    /** Random songs scoped to [storageFilter] (e.g. [com.theveloper.pixelplay.data.model.StorageFilter.DOWNLOADED]). */
+    suspend fun getRandomSongs(limit: Int, storageFilter: com.theveloper.pixelplay.data.model.StorageFilter): List<Song>
+
     /**
      * Returns a bounded song page without materializing the full library.
      */

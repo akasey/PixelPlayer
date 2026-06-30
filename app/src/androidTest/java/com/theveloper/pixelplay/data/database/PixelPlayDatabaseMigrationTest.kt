@@ -34,6 +34,7 @@ class PixelPlayDatabaseMigrationTest {
         context.deleteDatabase(DB_NAME_23_TO_24_DRIFTED)
         context.deleteDatabase(DB_NAME_35_TO_36)
         context.deleteDatabase(DB_NAME_39_TO_40)
+        context.deleteDatabase(DB_NAME_43_TO_44)
     }
 
     @Test
@@ -134,6 +135,33 @@ class PixelPlayDatabaseMigrationTest {
     }
 
     @Test
+    fun migration43To44AddsSourceColumnsAndBackfillsExistingDownloadsAsManual() {
+        val openHelper = createVersion43CacheEntriesDatabase(DB_NAME_43_TO_44)
+        val db = openHelper.writableDatabase
+
+        try {
+            PixelPlayDatabase.MIGRATION_43_44.migrate(db)
+
+            val columns = db.tableColumns("navidrome_cache_entries")
+            assertTrue("download_source" in columns)
+            assertTrue("last_played_at" in columns)
+
+            // Pre-existing downloaded row backfilled to MANUAL (2); play-only row stays NONE (0).
+            db.query("SELECT download_source FROM navidrome_cache_entries WHERE navidrome_id = 'dl'").use { c ->
+                assertTrue(c.moveToFirst())
+                assertEquals(2, c.getInt(0))
+            }
+            db.query("SELECT download_source FROM navidrome_cache_entries WHERE navidrome_id = 'played'").use { c ->
+                assertTrue(c.moveToFirst())
+                assertEquals(0, c.getInt(0))
+            }
+        } finally {
+            db.close()
+            openHelper.close()
+        }
+    }
+
+    @Test
     fun migration39To40AddsCompositeSongIndexes() {
         helper.createDatabase(DB_NAME_39_TO_40, 39).close()
 
@@ -154,6 +182,54 @@ class PixelPlayDatabaseMigrationTest {
     }
 
     private fun databaseNameFor(startVersion: Int): String = "migration-test-$startVersion"
+
+    private fun createVersion43CacheEntriesDatabase(
+        databaseName: String
+    ): SupportSQLiteOpenHelper {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        context.deleteDatabase(databaseName)
+
+        val callback = object : SupportSQLiteOpenHelper.Callback(43) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                // v43 shape of the cache-entries table (before download_source / last_played_at).
+                db.execSQL(
+                    """
+                        CREATE TABLE IF NOT EXISTS navidrome_cache_entries (
+                            navidrome_id TEXT NOT NULL PRIMARY KEY,
+                            title TEXT NOT NULL,
+                            artist TEXT NOT NULL,
+                            album TEXT NOT NULL,
+                            cover_art_id TEXT,
+                            duration INTEGER NOT NULL,
+                            mime_type TEXT,
+                            play_count INTEGER NOT NULL DEFAULT 0,
+                            is_downloaded INTEGER NOT NULL DEFAULT 0,
+                            size_bytes INTEGER NOT NULL DEFAULT 0,
+                            cached_at INTEGER NOT NULL DEFAULT 0
+                        )
+                    """.trimIndent()
+                )
+                // A downloaded row (should backfill to MANUAL) and a play-only row (stays NONE).
+                db.execSQL(
+                    "INSERT INTO navidrome_cache_entries (navidrome_id, title, artist, album, cover_art_id, duration, mime_type, play_count, is_downloaded, size_bytes, cached_at) " +
+                        "VALUES ('dl', 'T', 'A', 'Al', NULL, 1000, 'audio/mpeg', 5, 1, 1024, 123)"
+                )
+                db.execSQL(
+                    "INSERT INTO navidrome_cache_entries (navidrome_id, title, artist, album, cover_art_id, duration, mime_type, play_count, is_downloaded, size_bytes, cached_at) " +
+                        "VALUES ('played', 'T2', 'A2', 'Al2', NULL, 2000, 'audio/mpeg', 2, 0, 0, 0)"
+                )
+            }
+
+            override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+
+        return FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(databaseName)
+                .callback(callback)
+                .build()
+        )
+    }
 
     private fun createDriftedVersion23Database(
         databaseName: String
@@ -304,7 +380,7 @@ class PixelPlayDatabaseMigrationTest {
     }
 
     private object PixelPlayDatabaseVersion {
-        const val LATEST = 42
+        const val LATEST = 44
     }
 
     companion object {
@@ -312,6 +388,7 @@ class PixelPlayDatabaseMigrationTest {
         private const val DB_NAME_33_TO_34 = "migration-test-33-to-34"
         private const val DB_NAME_35_TO_36 = "migration-test-35-to-36"
         private const val DB_NAME_39_TO_40 = "migration-test-39-to-40"
+        private const val DB_NAME_43_TO_44 = "migration-test-43-to-44"
 
         private val ALL_MIGRATIONS = arrayOf(
             PixelPlayDatabase.MIGRATION_25_26,
@@ -330,7 +407,9 @@ class PixelPlayDatabaseMigrationTest {
             PixelPlayDatabase.MIGRATION_38_39,
             PixelPlayDatabase.MIGRATION_39_40,
             PixelPlayDatabase.MIGRATION_40_41,
-            PixelPlayDatabase.MIGRATION_41_42
+            PixelPlayDatabase.MIGRATION_41_42,
+            PixelPlayDatabase.MIGRATION_42_43,
+            PixelPlayDatabase.MIGRATION_43_44
         )
     }
 }
