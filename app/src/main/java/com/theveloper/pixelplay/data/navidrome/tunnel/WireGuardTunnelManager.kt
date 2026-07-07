@@ -3,6 +3,7 @@ package com.theveloper.pixelplay.data.navidrome.tunnel
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.os.SystemClock
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.di.AppScope
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -49,13 +50,15 @@ import javax.inject.Singleton
  *    session, and a restart (which rebuilds the underlay UDP bind on the current default network)
  *    is exactly what a roamed connection needs, so it is retried rather than trusted.
  *
- * Ambiguous triggers (a failed proxy connect reported by OkHttp, or [ensureReady] finding the
- * tunnel unhealthy) only *schedule a verification*; they never blind-restart, so a down Navidrome
- * *server* — which also surfaces as proxy connect failures — cannot flap a healthy tunnel. A
- * default-network *handoff* is unambiguous, though: it invalidates the UDP bind while the last
- * handshake is still recent enough to read "healthy", so it forces a rebind restart directly.
- * Restarts of an `Up` tunnel are rate-limited by [RESTART_COOLDOWN_MS] so a flapping network can't
- * churn them.
+ * Every trigger (a failed proxy connect reported by OkHttp, a default-network change, or
+ * [ensureReady] finding the tunnel unhealthy) only *schedules a verification*; nothing
+ * blind-restarts, so a down Navidrome *server* — which also surfaces as proxy connect failures —
+ * cannot flap a healthy tunnel. A default-network *handoff* additionally invalidates the engine's
+ * underlay UDP bind (`bindInvalidatedAtMs`): the handshake is still recent enough to read
+ * "healthy" while the old socket silently blackholes, so health is measured against the bind's
+ * validity, and every recovery path then converges on the rebind restart. Restarts of an `Up`
+ * tunnel are rate-limited by [RESTART_COOLDOWN_MS] so a flapping network can't churn them; a
+ * cooldown-suppressed restart re-arms its own retry, so it is delayed, never lost.
  *
  * The manager keeps its own default-network callback (rather than reusing ConnectivityStateHolder)
  * because it needs the network *identity* to detect handoffs, not just an online/offline boolean,
@@ -89,14 +92,27 @@ class WireGuardTunnelManager @Inject constructor(
     private var verifyJob: Job? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
-    // Wall-clock ms of the last restart of an Up tunnel; read/written only under restartMutex.
+    // All *AtMs fields below hold SystemClock.elapsedRealtime() stamps — monotonic, immune to the
+    // NTP/timezone wall-clock jumps that tend to accompany exactly the network changes we react to.
+
+    // When the last restart of an Up tunnel began; read/written only under restartMutex.
     private var lastRestartAtMs = 0L
 
-    // Wall-clock ms of the last tunnel (re)start, i.e. when the current WG session got its chance
-    // to complete a handshake. Used to bound how long a never-handshaked tunnel is trusted before
-    // it is treated as failed (tx rising, rx zero). Written under restartMutex, read on hot paths.
+    // When the current engine (re)started, i.e. when the current WG session got its chance to
+    // complete a handshake. Bounds how long a never-handshaked tunnel is trusted before it is
+    // treated as failed (tx rising, rx zero). Written under restartMutex, read on hot paths.
     @Volatile
     private var tunnelStartedAtMs = 0L
+
+    // When the engine's underlay UDP bind was last invalidated (a default-network handoff). An
+    // engine started before this instant is measured UNHEALTHY regardless of handshake freshness:
+    // after a handoff the old socket silently blackholes while the last handshake still looks
+    // recent, so freshness alone would read a dead link as fine. Routing the handoff through
+    // health (instead of a special forced restart) means every recovery trigger — ensureReady,
+    // scheduled verifications, proxy-connect failures — converges on the rebind, and the restart
+    // cooldown can delay it but never lose it.
+    @Volatile
+    private var bindInvalidatedAtMs = 0L
 
     // Timestamp of the last successful SOCKS probe; lets steady-state ensureReady calls skip
     // the socket connect. Reset on every restart (the port changes).
@@ -186,9 +202,12 @@ class WireGuardTunnelManager @Inject constructor(
 
     // ─── Health ────────────────────────────────────────────────────────
 
-    /** Up + listener accepting + a live (established, non-stale) WireGuard session. */
+    /** Up + underlay bind still valid + listener accepting + live (established, non-stale) session. */
     private suspend fun isHealthy(): Boolean {
         if (state.value !is TunnelState.Up) return false
+        // Engine predates the last default-network handoff: its UDP socket is bound to a network
+        // that no longer exists, so it must be measured dead even while the handshake is recent.
+        if (tunnelStartedAtMs < bindInvalidatedAtMs) return false
         if (!isSocksAlive()) return false
         return isHandshakeLive()
     }
@@ -199,7 +218,7 @@ class WireGuardTunnelManager @Inject constructor(
      */
     private suspend fun isSocksAlive(): Boolean {
         val address = (tunnel.socksProxy()?.address() as? InetSocketAddress) ?: return false
-        val now = System.currentTimeMillis()
+        val now = SystemClock.elapsedRealtime()
         if (now - lastProbeOkAtMs < PROBE_CACHE_MS) return true
         val alive = withContext(Dispatchers.IO) {
             runCatching {
@@ -231,8 +250,9 @@ class WireGuardTunnelManager @Inject constructor(
         val lastHandshake = tunnel.stats()?.lastHandshakeEpochSec ?: return true
         if (lastHandshake <= 0L) {
             // Never handshaked: trusted only while the first handshake could still be completing.
-            return System.currentTimeMillis() - tunnelStartedAtMs < HANDSHAKE_GRACE_MS
+            return SystemClock.elapsedRealtime() - tunnelStartedAtMs < HANDSHAKE_GRACE_MS
         }
+        // Deliberately wall-clock: lastHandshake is a Unix timestamp from wireguard-go.
         val ageSecs = System.currentTimeMillis() / 1000 - lastHandshake
         return ageSecs <= HANDSHAKE_STALE_SECS
     }
@@ -242,29 +262,31 @@ class WireGuardTunnelManager @Inject constructor(
     /**
      * Serialized stop-if-needed + start. Queued callers collapse: once a predecessor has restored
      * health, followers return without touching the engine. Restarting an `Up` tunnel is
-     * rate-limited by [RESTART_COOLDOWN_MS] so failure storms can't flap it.
+     * rate-limited by [RESTART_COOLDOWN_MS] so failure storms can't flap it — but a suppressed
+     * restart re-arms a verification at cooldown expiry, so recovery is delayed, never dropped
+     * (without this, a handoff landing inside the cooldown would leave the tunnel dead until the
+     * handshake aged past [HANDSHAKE_STALE_SECS], because the fresh-looking handshake would pass
+     * every later health check).
      *
-     * @param force skip the "already healthy" collapse. A default-network handoff invalidates the
-     *   underlay UDP bind regardless of what the (still-recent) handshake timestamp says, so it
-     *   must restart to rebind even though [isHealthy] would report the pre-handoff link as fine.
-     *   The [RESTART_COOLDOWN_MS] rate limit still applies, so flapping networks can't churn it.
      * @return false only when no start could be attempted because no valid config is stored.
      */
-    private suspend fun recover(reason: String, force: Boolean = false): Boolean = restartMutex.withLock {
+    private suspend fun recover(reason: String): Boolean = restartMutex.withLock {
         if (!enabled) return@withLock true
-        // Collapse queued recoveries: predecessor already fixed it (unless a handoff forces a rebind).
-        if (!force && isHealthy()) return@withLock true
+        // Collapse queued recoveries: predecessor already fixed it. (A network handoff cannot be
+        // masked here: it bumps bindInvalidatedAtMs, which makes isHealthy() false until restart.)
+        if (isHealthy()) return@withLock true
 
-        val now = System.currentTimeMillis()
+        val now = SystemClock.elapsedRealtime()
         if (state.value is TunnelState.Up) {
-            if (now - lastRestartAtMs < RESTART_COOLDOWN_MS) {
-                Timber.d("recover(%s): within cooldown, skipping restart", reason)
+            val sinceLastRestart = now - lastRestartAtMs
+            if (sinceLastRestart < RESTART_COOLDOWN_MS) {
+                Timber.d("recover(%s): within cooldown, retrying after it expires", reason)
+                scheduleVerify(reason, delayMs = RESTART_COOLDOWN_MS - sinceLastRestart)
                 return@withLock true
             }
             Timber.i("recover(%s): restarting tunnel", reason)
             lastRestartAtMs = now
             tunnel.stop()
-            lastProbeOkAtMs = 0L
         }
 
         val config = configStore.parsedConfig()
@@ -272,8 +294,9 @@ class WireGuardTunnelManager @Inject constructor(
             Timber.w("WireGuard enabled but no valid config stored; staying direct")
             return@withLock false
         }
+        lastProbeOkAtMs = 0L // the SOCKS port changes across restarts; drop the cached probe
         tunnel.start(config)
-        tunnelStartedAtMs = System.currentTimeMillis()
+        tunnelStartedAtMs = SystemClock.elapsedRealtime()
         true
     }
 
@@ -284,11 +307,11 @@ class WireGuardTunnelManager @Inject constructor(
      * [isHealthy] fails at fire time.
      */
     @Synchronized
-    private fun scheduleVerify(reason: String) {
+    private fun scheduleVerify(reason: String, delayMs: Long = VERIFY_SETTLE_MS) {
         if (!enabled || !tunnel.isSupported) return
         if (verifyJob?.isActive == true) return
         verifyJob = appScope.launch {
-            delay(VERIFY_SETTLE_MS)
+            delay(delayMs)
             if (!enabled) return@launch
             if (isHealthy()) {
                 Timber.d("verify(%s): tunnel healthy, no restart", reason)
@@ -313,15 +336,23 @@ class WireGuardTunnelManager @Inject constructor(
                 val handle = network.networkHandle
                 val previous = lastNetworkHandle
                 lastNetworkHandle = handle
-                // First network after registration: the enable path already starts the tunnel.
-                // Any different handle afterwards is a handoff (make-before-break delivers it
-                // directly; break-before-make still compares against the retained old handle).
-                // A handoff invalidates the underlay UDP bind, so force a rebind restart rather
-                // than merely verifying health: after a handoff the last handshake is still recent
-                // enough to read "healthy" while the socket silently blackholes (uploads climb,
-                // downloads stay zero). The restart's cooldown keeps a flapping network in check.
+                // Any different handle after the first is a handoff (make-before-break delivers
+                // it directly; break-before-make still compares against the retained old handle).
+                // A handoff invalidates the engine's underlay UDP bind: mark it so isHealthy()
+                // measures the pre-handoff engine as dead — after a handoff the last handshake is
+                // still recent enough to read "healthy" while the socket silently blackholes
+                // (uploads climb, downloads stay zero) — then verify, which restarts and rebinds
+                // on the new network. The restart cooldown keeps a flapping network in check, and
+                // a cooldown-suppressed restart re-arms itself (see recover()).
                 if (previous != null && previous != handle) {
-                    appScope.launch { recover("default network changed", force = true) }
+                    bindInvalidatedAtMs = SystemClock.elapsedRealtime()
+                    scheduleVerify("default network changed")
+                } else if (previous == null) {
+                    // First network after registration. Usually the enable path has already
+                    // started the tunnel, but when the feature was enabled while offline that
+                    // start failed — verify (cheap no-op when healthy) so connectivity arriving
+                    // later brings the tunnel up without waiting for the next request.
+                    scheduleVerify("first network available")
                 }
             }
         }

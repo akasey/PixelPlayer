@@ -58,6 +58,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -495,20 +496,33 @@ object AppModule {
         if (BuildConfig.ENABLE_WIREGUARD) netstack.get() else noOp.get()
 
     /**
-     * Navidrome-specific OkHttpClient. Shares the base connection pool/dispatcher but applies a
-     * dynamic [java.net.ProxySelector] driven by the WireGuard tunnel manager: the live SOCKS5
+     * Navidrome-specific OkHttpClient. Shares the base dispatcher but applies a dynamic
+     * [java.net.ProxySelector] driven by the WireGuard tunnel manager: the live SOCKS5
      * proxy when the tunnel is up (remote DNS is handled by the SOCKS server), direct when the
      * tunnel feature is disabled, and a fail-closed placeholder while the tunnel is enabled but
      * down/restarting — so Navidrome traffic (Subsonic auth tokens ride in query params) is never
      * silently sent off-tunnel. Used by the Navidrome API, stream proxy, cover-art fetcher, and
      * the offline-download path so all Navidrome traffic can be tunneled.
+     *
+     * ### Dedicated connection pool, evicted on tunnel transitions
+     * OkHttp reuses pooled connections without re-consulting the proxy selector: pool
+     * eligibility compares the selector *instance* and the address's static proxy field, never
+     * the proxy the pooled connection's route was actually built through. A connection opened
+     * while the tunnel was down (startup sync/cover art before the enabled flag loads, or the
+     * feature toggled off) therefore keeps carrying traffic OFF-tunnel after the tunnel comes up
+     * for as long as steady traffic keeps it warm — invisible on a LAN where the direct route
+     * works ("plays fine, tunnel counters flat"). The reverse also holds: after a roaming
+     * restart, requests can grab a pooled connection to the dead old SOCKS port. Evicting the
+     * (deliberately private) pool on every tunnel state change forces new requests to re-route
+     * through the current proxy decision.
      */
     @Provides
     @Singleton
     @NavidromeOkHttpClient
     fun provideNavidromeOkHttpClient(
         baseOkHttpClient: OkHttpClient,
-        tunnelManager: com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardTunnelManager
+        tunnelManager: com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardTunnelManager,
+        @AppScope appScope: CoroutineScope
     ): OkHttpClient {
         val proxySelector = object : java.net.ProxySelector() {
             override fun select(uri: java.net.URI?): MutableList<java.net.Proxy> =
@@ -527,12 +541,30 @@ object AppModule {
             }
         }
 
-        return baseOkHttpClient.newBuilder()
+        val connectionPool = okhttp3.ConnectionPool(
+            maxIdleConnections = 5,
+            keepAliveDuration = 30,
+            timeUnit = java.util.concurrent.TimeUnit.SECONDS
+        )
+
+        val client = baseOkHttpClient.newBuilder()
             .proxySelector(proxySelector)
+            .connectionPool(connectionPool)
             .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS) // longer for streaming
             .writeTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
             .build()
+
+        appScope.launch {
+            // StateFlow: fires once immediately (harmless no-op eviction) and then on every
+            // distinct tunnel state — Up(port), Down, Connecting, Error. Idle connections routed
+            // under the previous state are closed; in-flight exchanges finish on their own.
+            tunnelManager.state.collect {
+                connectionPool.evictAll()
+            }
+        }
+
+        return client
     }
 
     /**

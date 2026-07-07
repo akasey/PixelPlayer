@@ -179,6 +179,9 @@ abstract class CloudStreamProxy<K : Any>(
                         return@get
                     }
 
+                    // Once body streaming has begun we can no longer switch to an error status;
+                    // tracked so the catch below only sends an error response when it still can.
+                    var responseStarted = false
                     try {
                         val rangeValidation = CloudStreamSecurity.validateRangeHeader(
                             call.request.headers["Range"]
@@ -254,16 +257,25 @@ abstract class CloudStreamProxy<K : Any>(
                                 }
                                 ?: ContentType.Audio.Any
 
-                            if (upstream.code == 206) {
-                                call.response.status(HttpStatusCode.PartialContent)
-                            } else {
-                                call.response.status(HttpStatusCode.OK)
-                            }
                             call.response.header("Accept-Ranges", acceptRanges ?: "bytes")
-                            contentLength?.let { call.response.header("Content-Length", it) }
                             contentRange?.let { call.response.header("Content-Range", it) }
 
-                            call.respondBytesWriter(contentType = responseContentType) {
+                            val status = if (upstream.code == 206) {
+                                HttpStatusCode.PartialContent
+                            } else {
+                                HttpStatusCode.OK
+                            }
+                            responseStarted = true
+                            // Content length must ride in the OutgoingContent, not a manual
+                            // header: Ktor treats a body writer with unknown length as chunked,
+                            // and a hand-appended Content-Length alongside the engine's
+                            // Transfer-Encoding: chunked yields a response with both framing
+                            // headers — an RFC 7230 violation some HTTP clients reject.
+                            call.respondBytesWriter(
+                                contentType = responseContentType,
+                                status = status,
+                                contentLength = contentLength?.toLongOrNull()
+                            ) {
                                 withContext(Dispatchers.IO) {
                                     body.byteStream().use { input ->
                                         val buffer = ByteArray(64 * 1024)
@@ -286,7 +298,14 @@ abstract class CloudStreamProxy<K : Any>(
                         ) {
                             // Client disconnected, normal behavior
                         } else {
-                            Timber.w(e, "$proxyTag stream failed")
+                            Timber.w(e, "$proxyTag stream failed for id=%s (responseStarted=%b)", id, responseStarted)
+                            // Before the body started we can still tell the player what happened;
+                            // without this the route falls through to an unexplained 404.
+                            if (!responseStarted) {
+                                runCatching {
+                                    call.respond(HttpStatusCode.BadGateway, "Upstream fetch failed")
+                                }
+                            }
                         }
                     }
                 }
