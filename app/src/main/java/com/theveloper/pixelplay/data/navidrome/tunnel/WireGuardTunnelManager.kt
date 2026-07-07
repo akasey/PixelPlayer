@@ -38,20 +38,24 @@ import javax.inject.Singleton
  * ### Roaming resilience — verified recovery
  * [TunnelState] cannot observe its own engine dying: the netstack SOCKS listener and the WireGuard
  * UDP link fail independently (a NAT rebind can blackhole UDP while the loopback listener still
- * accepts, and a reclaimed engine kills the listener while state still says `Up`). All recovery
- * therefore flows through one primitive, [recover], which is only invoked after [isHealthy]
- * *measures* the tunnel as dead:
+ * accepts, and a reclaimed engine kills the listener while state still says `Up`). Recovery flows
+ * through one primitive, [recover], invoked after [isHealthy] *measures* the tunnel as dead:
  *  - **listener probe** — a short loopback TCP connect detects "connection refused" (engine died);
- *  - **handshake freshness** — [WireGuardTunnel.stats]'s `lastHandshakeEpochSec` detects a
- *    blackholed UDP path (with keepalives flowing, a healthy peer re-handshakes ~every 2 min, so a
- *    handshake older than [HANDSHAKE_STALE_SECS] while `Up` means the link is dead even though the
- *    listener accepts). A tunnel that has *never* handshaked is deliberately not restarted — that
- *    is a config/endpoint problem a restart cannot fix, and restarting would just churn.
+ *  - **live handshake** — [WireGuardTunnel.stats]'s `lastHandshakeEpochSec` detects a blackholed
+ *    UDP path (with keepalives flowing, a healthy peer re-handshakes ~every 2 min, so a handshake
+ *    older than [HANDSHAKE_STALE_SECS] while `Up` means the link is dead even though the listener
+ *    accepts). A tunnel that has *never* handshaked is live only during an initial
+ *    [HANDSHAKE_GRACE_MS] window; past it, `rx == 0` while uploads climb is a failed-to-establish
+ *    session, and a restart (which rebuilds the underlay UDP bind on the current default network)
+ *    is exactly what a roamed connection needs, so it is retried rather than trusted.
  *
- * Triggers (default-network change, a failed proxy connect reported by OkHttp, or [ensureReady]
- * finding the tunnel unhealthy) only *schedule a verification*; they never blind-restart, so a
- * down Navidrome *server* — which also surfaces as proxy connect failures — cannot flap a healthy
- * tunnel. Restarts of an `Up` tunnel are additionally rate-limited by [RESTART_COOLDOWN_MS].
+ * Ambiguous triggers (a failed proxy connect reported by OkHttp, or [ensureReady] finding the
+ * tunnel unhealthy) only *schedule a verification*; they never blind-restart, so a down Navidrome
+ * *server* — which also surfaces as proxy connect failures — cannot flap a healthy tunnel. A
+ * default-network *handoff* is unambiguous, though: it invalidates the UDP bind while the last
+ * handshake is still recent enough to read "healthy", so it forces a rebind restart directly.
+ * Restarts of an `Up` tunnel are rate-limited by [RESTART_COOLDOWN_MS] so a flapping network can't
+ * churn them.
  *
  * The manager keeps its own default-network callback (rather than reusing ConnectivityStateHolder)
  * because it needs the network *identity* to detect handoffs, not just an online/offline boolean,
@@ -87,6 +91,12 @@ class WireGuardTunnelManager @Inject constructor(
 
     // Wall-clock ms of the last restart of an Up tunnel; read/written only under restartMutex.
     private var lastRestartAtMs = 0L
+
+    // Wall-clock ms of the last tunnel (re)start, i.e. when the current WG session got its chance
+    // to complete a handshake. Used to bound how long a never-handshaked tunnel is trusted before
+    // it is treated as failed (tx rising, rx zero). Written under restartMutex, read on hot paths.
+    @Volatile
+    private var tunnelStartedAtMs = 0L
 
     // Timestamp of the last successful SOCKS probe; lets steady-state ensureReady calls skip
     // the socket connect. Reset on every restart (the port changes).
@@ -176,11 +186,11 @@ class WireGuardTunnelManager @Inject constructor(
 
     // ─── Health ────────────────────────────────────────────────────────
 
-    /** Up + listener accepting + handshake not stale. */
+    /** Up + listener accepting + a live (established, non-stale) WireGuard session. */
     private suspend fun isHealthy(): Boolean {
         if (state.value !is TunnelState.Up) return false
         if (!isSocksAlive()) return false
-        return !isHandshakeStale()
+        return isHandshakeLive()
     }
 
     /**
@@ -204,16 +214,27 @@ class WireGuardTunnelManager @Inject constructor(
     }
 
     /**
-     * True when the peer handshake is older than [HANDSHAKE_STALE_SECS] — the UDP path is
-     * blackholed (NAT rebind, network handoff) even though the loopback listener still accepts.
-     * A tunnel that never handshaked (`lastHandshakeEpochSec == 0`) is NOT considered stale:
-     * that's a config/endpoint problem a restart cannot fix. Unknown stats ⇒ assume fresh.
+     * True when the peer has a live WireGuard session: it handshaked and that handshake is not
+     * older than [HANDSHAKE_STALE_SECS] (an older one means the UDP path is blackholed — NAT
+     * rebind, network handoff — even though the loopback listener still accepts).
+     *
+     * A tunnel that has *never* handshaked (`lastHandshakeEpochSec == 0`) is treated as live only
+     * during the initial [HANDSHAKE_GRACE_MS] window after (re)start, while the first handshake is
+     * still in flight. Past that window a tunnel with no handshake is NOT live — this is exactly
+     * the "uploads climb, downloads stay zero" symptom (handshake initiations go out, nothing
+     * comes back). Unlike a stale-but-once-established link, a restart *can* fix it: it rebuilds
+     * the underlay UDP bind on the current default network, which is precisely what a roamed
+     * connection needs. Unknown stats (a transient IpcGet failure) ⇒ assume live, so a hiccup in
+     * reading counters never triggers a needless restart.
      */
-    private fun isHandshakeStale(): Boolean {
-        val lastHandshake = tunnel.stats()?.lastHandshakeEpochSec ?: return false
-        if (lastHandshake <= 0L) return false
+    private fun isHandshakeLive(): Boolean {
+        val lastHandshake = tunnel.stats()?.lastHandshakeEpochSec ?: return true
+        if (lastHandshake <= 0L) {
+            // Never handshaked: trusted only while the first handshake could still be completing.
+            return System.currentTimeMillis() - tunnelStartedAtMs < HANDSHAKE_GRACE_MS
+        }
         val ageSecs = System.currentTimeMillis() / 1000 - lastHandshake
-        return ageSecs > HANDSHAKE_STALE_SECS
+        return ageSecs <= HANDSHAKE_STALE_SECS
     }
 
     // ─── Recovery ──────────────────────────────────────────────────────
@@ -223,12 +244,16 @@ class WireGuardTunnelManager @Inject constructor(
      * health, followers return without touching the engine. Restarting an `Up` tunnel is
      * rate-limited by [RESTART_COOLDOWN_MS] so failure storms can't flap it.
      *
+     * @param force skip the "already healthy" collapse. A default-network handoff invalidates the
+     *   underlay UDP bind regardless of what the (still-recent) handshake timestamp says, so it
+     *   must restart to rebind even though [isHealthy] would report the pre-handoff link as fine.
+     *   The [RESTART_COOLDOWN_MS] rate limit still applies, so flapping networks can't churn it.
      * @return false only when no start could be attempted because no valid config is stored.
      */
-    private suspend fun recover(reason: String): Boolean = restartMutex.withLock {
+    private suspend fun recover(reason: String, force: Boolean = false): Boolean = restartMutex.withLock {
         if (!enabled) return@withLock true
-        // Collapse queued recoveries: predecessor already fixed it.
-        if (isHealthy()) return@withLock true
+        // Collapse queued recoveries: predecessor already fixed it (unless a handoff forces a rebind).
+        if (!force && isHealthy()) return@withLock true
 
         val now = System.currentTimeMillis()
         if (state.value is TunnelState.Up) {
@@ -248,6 +273,7 @@ class WireGuardTunnelManager @Inject constructor(
             return@withLock false
         }
         tunnel.start(config)
+        tunnelStartedAtMs = System.currentTimeMillis()
         true
     }
 
@@ -290,8 +316,12 @@ class WireGuardTunnelManager @Inject constructor(
                 // First network after registration: the enable path already starts the tunnel.
                 // Any different handle afterwards is a handoff (make-before-break delivers it
                 // directly; break-before-make still compares against the retained old handle).
+                // A handoff invalidates the underlay UDP bind, so force a rebind restart rather
+                // than merely verifying health: after a handoff the last handshake is still recent
+                // enough to read "healthy" while the socket silently blackholes (uploads climb,
+                // downloads stay zero). The restart's cooldown keeps a flapping network in check.
                 if (previous != null && previous != handle) {
-                    scheduleVerify("default network changed")
+                    appScope.launch { recover("default network changed", force = true) }
                 }
             }
         }
@@ -321,5 +351,12 @@ class WireGuardTunnelManager @Inject constructor(
          * (REKEY_AFTER_TIME = 120s); 3 min of silence while Up means the link is dead.
          */
         private const val HANDSHAKE_STALE_SECS = 180L
+        /**
+         * How long a freshly (re)started tunnel is trusted before its first handshake must have
+         * landed. WireGuard's handshake is a single round-trip; a few seconds covers a slow mobile
+         * RTT and retransmits (REKEY_TIMEOUT = 5s). Past this with `rx == 0` the session failed to
+         * establish and a rebind restart is warranted.
+         */
+        private const val HANDSHAKE_GRACE_MS = 15_000L
     }
 }
