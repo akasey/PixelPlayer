@@ -75,6 +75,24 @@ class WireGuardConfigParserTest {
     }
 
     @Test
+    fun `clamps oversized mtu for the engine but keeps the parsed value`() {
+        // wg-quick exports commonly say MTU = 1420; full-size frames at that MTU become
+        // ~1500-byte UDP datagrams that mobile paths silently drop (small packets pass —
+        // handshake and ping work, streaming blackholes). The engine must get the clamped value.
+        val cfg = WireGuardConfigParser.parse(sampleConf).copy(mtu = 1420)
+        assertThat(cfg.mtu).isEqualTo(1420)
+        assertThat(cfg.effectiveMtu).isEqualTo(WireGuardConfig.MAX_SAFE_MTU)
+
+        // Values at or below the ceiling pass through untouched; above it they clamp.
+        assertThat(cfg.copy(mtu = 1200).effectiveMtu).isEqualTo(1200)
+        assertThat(WireGuardConfigParser.parse(sampleConf).effectiveMtu) // sampleConf: MTU = 1320
+            .isEqualTo(WireGuardConfig.MAX_SAFE_MTU)
+
+        // Absurdly small values are floored rather than propagated.
+        assertThat(cfg.copy(mtu = 100).effectiveMtu).isEqualTo(WireGuardConfig.MIN_MTU)
+    }
+
+    @Test
     fun `defaults persistent keepalive when absent and honors explicit zero`() {
         val conf = """
             [Interface]

@@ -350,11 +350,33 @@ func handleSocks(c net.Conn, n *netstack.Net) {
 		return
 	}
 
-	// Pump bidirectionally.
+	// Pump bidirectionally with half-close propagation: when one direction finishes, forward the
+	// FIN (CloseWrite) and keep relaying the other direction. Tearing both down on the first EOF
+	// would truncate the response for any client that half-closes after sending its request.
 	done := make(chan struct{}, 2)
-	go func() { io.Copy(upstream, c); done <- struct{}{} }()
-	go func() { io.Copy(c, upstream); done <- struct{}{} }()
+	go func() {
+		io.Copy(upstream, c)
+		closeWrite(upstream)
+		done <- struct{}{}
+	}()
+	go func() {
+		io.Copy(c, upstream)
+		closeWrite(c)
+		done <- struct{}{}
+	}()
 	<-done
+	<-done
+}
+
+// closeWrite half-closes the write side when the transport supports it (both net.TCPConn and
+// gonet.TCPConn do), else fully closes so the peer still observes EOF.
+func closeWrite(c net.Conn) {
+	type closeWriter interface{ CloseWrite() error }
+	if cw, ok := c.(closeWriter); ok {
+		cw.CloseWrite()
+		return
+	}
+	c.Close()
 }
 
 func reply(c net.Conn, status byte) error {

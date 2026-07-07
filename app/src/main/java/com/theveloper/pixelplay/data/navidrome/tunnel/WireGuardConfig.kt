@@ -34,6 +34,23 @@ data class WireGuardConfig(
         get() = addresses.map { it.substringBefore('/').trim() }.filter { it.isNotEmpty() }
 
     /**
+     * The MTU actually handed to the netstack engine: the configured value clamped to
+     * [[MIN_MTU], [MAX_SAFE_MTU]].
+     *
+     * Exported `wg-quick` configs routinely carry `MTU = 1420` (derived from a 1500-byte home
+     * uplink). Through mobile data that is poison: each full-size tunnel frame becomes a
+     * ~1500-byte encrypted UDP datagram, which exceeds the effective path MTU of many cellular /
+     * CGNAT / IPv6-tunneled routes and is silently dropped — WireGuard cannot fragment, and an
+     * app-layer tunnel cannot run path-MTU discovery. The failure mode is maximally deceptive:
+     * handshakes, keepalives and small API responses (all sub-MTU packets) sail through while
+     * bulk transfer — audio streaming — receives nothing. Clamping to 1280 (the WireGuard
+     * Android app's default) keeps the wire datagram ≈1340–1360 bytes, under practically every
+     * real-world path MTU, at a negligible throughput cost for audio.
+     */
+    val effectiveMtu: Int
+        get() = mtu.coerceIn(MIN_MTU, MAX_SAFE_MTU)
+
+    /**
      * Render the UAPI configuration string consumed by wireguard-go `Device.IpcSet`.
      * Keys are hex-encoded; the peer section starts with `public_key`.
      */
@@ -58,6 +75,12 @@ data class WireGuardConfig(
 
     companion object {
         const val DEFAULT_MTU = 1280
+
+        /** Ceiling for [effectiveMtu]; see its doc for why larger configured values are unsafe. */
+        const val MAX_SAFE_MTU = 1280
+
+        /** IPv4 minimum reassembly size — anything below this is a typo, not a tuning choice. */
+        const val MIN_MTU = 576
 
         /**
          * Keepalive applied when a config has no `PersistentKeepalive` line. 25 s is the

@@ -50,6 +50,12 @@ class NetstackWireGuardTunnel @Inject constructor() : WireGuardTunnel {
         }
         _state.value = TunnelState.Connecting
         try {
+            if (config.effectiveMtu != config.mtu) {
+                Timber.w(
+                    "WireGuard MTU %d clamped to %d: oversized tunnel frames blackhole on mobile paths",
+                    config.mtu, config.effectiveMtu
+                )
+            }
             val port = withContext(Dispatchers.IO) {
                 val method = cls.getMethod(
                     "startProxy",
@@ -61,7 +67,7 @@ class NetstackWireGuardTunnel @Inject constructor() : WireGuardTunnel {
                     config.toUapiConfig(),
                     config.localAddresses.joinToString(","),
                     config.dnsServers.joinToString(","),
-                    config.mtu.toLong(),
+                    config.effectiveMtu.toLong(),
                     0L // auto-pick a free SOCKS port
                 ) as Long).toInt()
             }
