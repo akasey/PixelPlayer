@@ -75,6 +75,29 @@ class WireGuardConfigParserTest {
     }
 
     @Test
+    fun `defaults persistent keepalive when absent and honors explicit zero`() {
+        val conf = """
+            [Interface]
+            PrivateKey = $zeroKeyB64
+            Address = 10.0.0.2/32
+            [Peer]
+            PublicKey = $zeroKeyB64
+            Endpoint = 1.2.3.4:51820
+        """.trimIndent()
+
+        val cfg = WireGuardConfigParser.parse(conf)
+        // Parser reports what the file says (absent) …
+        assertThat(cfg.persistentKeepalive).isNull()
+        // … but the UAPI rendering injects the mobile-NAT default.
+        assertThat(cfg.toUapiConfig()).contains(
+            "persistent_keepalive_interval=${WireGuardConfig.DEFAULT_PERSISTENT_KEEPALIVE_SECS}"
+        )
+        // An explicit 0 (keepalive off) is honored, not overridden.
+        assertThat(cfg.copy(persistentKeepalive = 0).toUapiConfig())
+            .doesNotContain("persistent_keepalive_interval")
+    }
+
+    @Test
     fun `ignores comments and blank lines`() {
         val conf = """
             # leading comment

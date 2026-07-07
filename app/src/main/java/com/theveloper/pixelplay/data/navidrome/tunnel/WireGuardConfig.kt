@@ -44,7 +44,12 @@ data class WireGuardConfig(
             appendLine("preshared_key=${base64KeyToHex(it)}")
         }
         appendLine("endpoint=$endpoint")
-        persistentKeepalive?.let { appendLine("persistent_keepalive_interval=$it") }
+        // Default the keepalive when the config omits it: mobile connections sit behind
+        // carrier-grade NAT whose UDP mappings expire within ~30–120 s of idle; without
+        // keepalives an idle tunnel silently blackholes (requests hang, no error) — the classic
+        // "unreliable on mobile data" symptom. An explicit value (including 0 = off) is honored.
+        val keepalive = persistentKeepalive ?: DEFAULT_PERSISTENT_KEEPALIVE_SECS
+        if (keepalive > 0) appendLine("persistent_keepalive_interval=$keepalive")
         // Replace, don't accumulate, allowed IPs.
         appendLine("replace_allowed_ips=true")
         val ips = allowedIps.ifEmpty { listOf("0.0.0.0/0", "::/0") }
@@ -53,6 +58,13 @@ data class WireGuardConfig(
 
     companion object {
         const val DEFAULT_MTU = 1280
+
+        /**
+         * Keepalive applied when a config has no `PersistentKeepalive` line. 25 s is the
+         * conventional NAT-traversal value from the WireGuard documentation — short enough to
+         * hold carrier-grade NAT mappings open, long enough to be battery-negligible.
+         */
+        const val DEFAULT_PERSISTENT_KEEPALIVE_SECS = 25
 
         /** Decode a standard 32-byte WireGuard base64 key into lowercase hex. */
         fun base64KeyToHex(base64: String): String {

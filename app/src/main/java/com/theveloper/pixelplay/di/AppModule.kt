@@ -496,10 +496,12 @@ object AppModule {
 
     /**
      * Navidrome-specific OkHttpClient. Shares the base connection pool/dispatcher but applies a
-     * dynamic [java.net.ProxySelector] that returns the live WireGuard SOCKS5 proxy when the
-     * tunnel is up (remote DNS is handled by the SOCKS server), and falls back to a direct
-     * connection otherwise. Used by the Navidrome API, stream proxy, cover-art fetcher, and the
-     * offline-download path so all Navidrome traffic can be tunneled.
+     * dynamic [java.net.ProxySelector] driven by the WireGuard tunnel manager: the live SOCKS5
+     * proxy when the tunnel is up (remote DNS is handled by the SOCKS server), direct when the
+     * tunnel feature is disabled, and a fail-closed placeholder while the tunnel is enabled but
+     * down/restarting — so Navidrome traffic (Subsonic auth tokens ride in query params) is never
+     * silently sent off-tunnel. Used by the Navidrome API, stream proxy, cover-art fetcher, and
+     * the offline-download path so all Navidrome traffic can be tunneled.
      */
     @Provides
     @Singleton
@@ -510,7 +512,7 @@ object AppModule {
     ): OkHttpClient {
         val proxySelector = object : java.net.ProxySelector() {
             override fun select(uri: java.net.URI?): MutableList<java.net.Proxy> =
-                mutableListOf(tunnelManager.socksProxy() ?: java.net.Proxy.NO_PROXY)
+                mutableListOf(tunnelManager.requiredProxy() ?: java.net.Proxy.NO_PROXY)
 
             override fun connectFailed(
                 uri: java.net.URI?,
@@ -518,6 +520,10 @@ object AppModule {
                 ioe: java.io.IOException?
             ) {
                 timber.log.Timber.w(ioe, "Navidrome proxy connect failed for $uri via $sa")
+                // Ambiguous signal: fires for a dead localhost listener but also when the SOCKS
+                // server relays an upstream failure (server down through a healthy tunnel). The
+                // manager verifies actual tunnel health before deciding to restart.
+                tunnelManager.onProxyConnectFailed()
             }
         }
 
