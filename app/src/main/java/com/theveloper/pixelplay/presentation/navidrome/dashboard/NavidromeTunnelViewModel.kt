@@ -2,14 +2,16 @@ package com.theveloper.pixelplay.presentation.navidrome.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.theveloper.pixelplay.data.navidrome.tunnel.DiagnosticsReport
+import com.theveloper.pixelplay.data.navidrome.tunnel.TunnelDiagnostics
 import com.theveloper.pixelplay.data.navidrome.tunnel.TunnelState
 import com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardConfigParser
 import com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardConfigStore
 import com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardStats
 import com.theveloper.pixelplay.data.navidrome.tunnel.WireGuardTunnelManager
-import com.theveloper.pixelplay.data.network.navidrome.NavidromeApiService
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -34,24 +36,17 @@ data class TunnelStatsUi(
     val upBytesPerSec: Long,
 )
 
-/** Transient result of a "Test tunnel" run, shown to the user. */
-sealed interface TunnelTestResult {
-    data object Idle : TunnelTestResult
-    data object Running : TunnelTestResult
-    data object Success : TunnelTestResult
-    data class Failure(val message: String) : TunnelTestResult
-}
-
 /**
  * Drives the WireGuard tunnel section of the Navidrome dashboard: enable toggle, `.conf` import,
- * live connection state, and a ping-based connectivity test.
+ * live connection state, and a layered connectivity diagnosis (tunnel → handshake → internet →
+ * server) that separates tunnel problems from server problems.
  */
 @HiltViewModel
 class NavidromeTunnelViewModel @Inject constructor(
     private val tunnelManager: WireGuardTunnelManager,
     private val configStore: WireGuardConfigStore,
     private val userPreferencesRepository: UserPreferencesRepository,
-    private val api: NavidromeApiService,
+    private val diagnostics: TunnelDiagnostics,
 ) : ViewModel() {
 
     val isSupported: Boolean get() = tunnelManager.isSupported
@@ -68,8 +63,11 @@ class NavidromeTunnelViewModel @Inject constructor(
     private val _importError = MutableStateFlow<String?>(null)
     val importError: StateFlow<String?> = _importError.asStateFlow()
 
-    private val _testResult = MutableStateFlow<TunnelTestResult>(TunnelTestResult.Idle)
-    val testResult: StateFlow<TunnelTestResult> = _testResult.asStateFlow()
+    /** Latest diagnostics snapshot, or null when a run has never been started. */
+    private val _diagnostics = MutableStateFlow<DiagnosticsReport?>(null)
+    val diagnostics: StateFlow<DiagnosticsReport?> = _diagnostics.asStateFlow()
+
+    private var diagnosticsJob: Job? = null
 
     /**
      * Live tunnel stats, polled once a second while observed. Speeds are computed from the byte
@@ -123,25 +121,19 @@ class NavidromeTunnelViewModel @Inject constructor(
     fun clearConfig() {
         configStore.clear()
         _endpoint.value = null
-        _testResult.value = TunnelTestResult.Idle
+        diagnosticsJob?.cancel()
+        _diagnostics.value = null
         setEnabled(false)
     }
 
-    /** Bring the tunnel up (if enabled) and ping the server through it. */
-    fun testTunnel() {
-        viewModelScope.launch {
-            _testResult.value = TunnelTestResult.Running
-            val ready = tunnelManager.ensureReady()
-            if (!ready && enabled.value) {
-                _testResult.value = TunnelTestResult.Failure(
-                    (tunnelManager.state.value as? TunnelState.Error)?.message ?: "Tunnel failed to connect"
-                )
-                return@launch
-            }
-            api.ping().fold(
-                onSuccess = { _testResult.value = TunnelTestResult.Success },
-                onFailure = { _testResult.value = TunnelTestResult.Failure(it.message ?: "Ping failed") }
-            )
+    /**
+     * Run the layered tunnel diagnosis, streaming progressive updates into [diagnostics] so the UI
+     * shows each probe resolving live. A run in progress is left to finish (button is disabled).
+     */
+    fun runDiagnostics() {
+        if (diagnosticsJob?.isActive == true) return
+        diagnosticsJob = viewModelScope.launch {
+            diagnostics.run().collect { report -> _diagnostics.value = report }
         }
     }
 }
