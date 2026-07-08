@@ -28,6 +28,10 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Cancel
+import androidx.compose.material.icons.rounded.RemoveCircleOutline
+import androidx.compose.material.icons.rounded.NetworkCheck
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -47,6 +51,10 @@ import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.database.NavidromeCacheEntryEntity
 import com.theveloper.pixelplay.data.database.NavidromePlaylistEntity
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.navidrome.tunnel.DiagnosisSeverity
+import com.theveloper.pixelplay.data.navidrome.tunnel.DiagnosticProbe
+import com.theveloper.pixelplay.data.navidrome.tunnel.DiagnosticsReport
+import com.theveloper.pixelplay.data.navidrome.tunnel.ProbeState
 import com.theveloper.pixelplay.data.navidrome.tunnel.TunnelState
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
@@ -732,7 +740,7 @@ private fun NavidromeTunnelCard(
     val endpoint by viewModel.endpoint.collectAsStateWithLifecycle()
     val tunnelState by viewModel.tunnelState.collectAsStateWithLifecycle()
     val importError by viewModel.importError.collectAsStateWithLifecycle()
-    val testResult by viewModel.testResult.collectAsStateWithLifecycle()
+    val diagnostics by viewModel.diagnostics.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
 
     val pickConf = rememberLauncherForActivityResult(
@@ -846,11 +854,9 @@ private fun NavidromeTunnelCard(
                     fontFamily = GoogleSansRounded
                 )
             }
-            when (val r = testResult) {
-                is TunnelTestResult.Running -> TunnelTestLine("Testing…", MaterialTheme.colorScheme.onSurfaceVariant)
-                is TunnelTestResult.Success -> TunnelTestLine("Test succeeded", MaterialTheme.colorScheme.primary)
-                is TunnelTestResult.Failure -> TunnelTestLine("Test failed: ${r.message}", MaterialTheme.colorScheme.error)
-                TunnelTestResult.Idle -> {}
+            diagnostics?.let { report ->
+                Spacer(Modifier.height(12.dp))
+                TunnelDiagnosticsBlock(report)
             }
 
             Spacer(Modifier.height(16.dp))
@@ -866,14 +872,23 @@ private fun NavidromeTunnelCard(
                     Spacer(Modifier.width(8.dp))
                     Text("Upload .conf", fontFamily = GoogleSansRounded)
                 }
+                val running = diagnostics?.inProgress == true
                 FilledTonalButton(
-                    onClick = { viewModel.testTunnel() },
-                    enabled = endpoint != null,
+                    onClick = { viewModel.runDiagnostics() },
+                    enabled = endpoint != null && !running,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(Icons.Rounded.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
+                    if (running) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Icon(Icons.Rounded.NetworkCheck, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
                     Spacer(Modifier.width(8.dp))
-                    Text("Test", fontFamily = GoogleSansRounded)
+                    Text("Diagnose", fontFamily = GoogleSansRounded)
                 }
             }
             if (endpoint != null) {
@@ -887,9 +902,85 @@ private fun NavidromeTunnelCard(
 }
 
 @Composable
-private fun TunnelTestLine(text: String, color: Color) {
-    Spacer(Modifier.height(4.dp))
-    Text(text = text, style = MaterialTheme.typography.bodySmall, color = color, fontFamily = GoogleSansRounded)
+private fun TunnelDiagnosticsBlock(report: DiagnosticsReport) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .padding(12.dp)
+    ) {
+        report.probes.forEach { probe ->
+            DiagnosticProbeRow(probe)
+            Spacer(Modifier.height(6.dp))
+        }
+        report.diagnosis?.let { message ->
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            val color = when (report.severity) {
+                DiagnosisSeverity.OK -> MaterialTheme.colorScheme.primary
+                DiagnosisSeverity.WARN -> MaterialTheme.colorScheme.tertiary
+                DiagnosisSeverity.ERROR -> MaterialTheme.colorScheme.error
+                DiagnosisSeverity.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = color,
+                fontFamily = GoogleSansRounded,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticProbeRow(probe: DiagnosticProbe) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        when (probe.state) {
+            ProbeState.RUNNING -> CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            ProbeState.OK -> Icon(
+                Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            ProbeState.FAIL -> Icon(
+                Icons.Rounded.Cancel,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.error
+            )
+            ProbeState.SKIPPED, ProbeState.PENDING -> Icon(
+                Icons.Rounded.RemoveCircleOutline,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = probe.label,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = GoogleSansRounded,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.weight(1f))
+        probe.detail?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = GoogleSansRounded,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 160.dp)
+            )
+        }
+    }
 }
 
 @Composable
